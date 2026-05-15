@@ -7,7 +7,7 @@ import { Gavel, Gamepad2, MessageCircle, User, Users } from "lucide-react";
 const bottomNavItems = [
     { label: "My Team", href: "/myteam", icon: Users, enabled: true },
     { label: "Bidding", href: null, icon: Gavel, enabled: false },
-    { label: "Games", href: null, icon: Gamepad2, enabled: false },
+    { label: "Games", href: "/games", icon: Gamepad2, enabled: true },
     { label: "Live Chat", href: "/live", icon: MessageCircle, enabled: true },
 ];
 

@@ -87,7 +87,18 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { gql } from '@apollo/client';
 import { useMutation, useSubscription } from '@apollo/client/react';
-import { ArrowLeft, ArrowUp, Plus, Send, Users } from 'lucide-react';
+import { ArrowLeft, ArrowUp, Plus, Send, Smile, Users } from 'lucide-react';
+
+const REACTIONS = [
+  { id: 'heart', emoji: '❤️', label: 'Heart' },
+  { id: 'thumbs', emoji: '👍', label: 'Thumbs up' },
+  { id: 'raise', emoji: '🙋', label: 'Hand raise' },
+] as const;
+
+type FloatingReaction = {
+  id: string;
+  emoji: string;
+};
 
 const CHAT_SUBSCRIPTION = gql`
   subscription MySubscription($sessionId: uuid!) {
@@ -170,7 +181,10 @@ function normalizeMessages(items?: ChatItem[]) {
 
 export default function LivePage() {
   const [input, setInput] = useState('');
+  const [reactionsOpen, setReactionsOpen] = useState(false);
+  const [floatingReactions, setFloatingReactions] = useState<FloatingReaction[]>([]);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const reactionsRef = useRef<HTMLDivElement | null>(null);
 
   const {
     data: sessionData,
@@ -212,6 +226,32 @@ export default function LivePage() {
       scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     });
   }, [messages.length]);
+
+  useEffect(() => {
+    if (!reactionsOpen) return;
+
+    function handlePointerDown(event: MouseEvent | TouchEvent) {
+      if (!reactionsRef.current?.contains(event.target as Node)) {
+        setReactionsOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+    };
+  }, [reactionsOpen]);
+
+  function triggerReaction(emoji: string) {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setFloatingReactions((prev) => [...prev, { id, emoji }]);
+    setReactionsOpen(false);
+    window.setTimeout(() => {
+      setFloatingReactions((prev) => prev.filter((item) => item.id !== id));
+    }, 1800);
+  }
 
   async function sendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -283,15 +323,16 @@ export default function LivePage() {
 
             {activeSessionId && (
               <div className="mt-4 truncate border border-[#2e2e2e] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">
-                Active session → {activeSessionId}
+                Session is Active
               </div>
             )}
           </header>
 
-          <div className="relative min-h-0 overflow-hidden border-x border-[#2e2e2e] bg-[#171717]/70">
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden border-x border-[#2e2e2e] bg-[#171717]/70">
             <div className="pointer-events-none absolute left-0 right-0 top-0 z-20 h-20 bg-gradient-to-b from-[#181818] via-[#181818]/75 to-transparent backdrop-blur-[2px]" />
 
-            <div ref={scrollRef} className="h-full overflow-y-auto px-0 pb-6 pt-10 scrollbar-thin scrollbar-track-[#171717] scrollbar-thumb-[#2e2e2e]">
+            <div ref={scrollRef} className="flex h-full flex-col overflow-y-auto overscroll-contain px-0 pb-4 pt-4">
+              <div className="mt-auto flex min-h-min flex-col">
               {sessionLoading && <SystemMessage title="Loading session" body="Checking for the latest active live session." />}
               {errorMessage && <SystemMessage title="Connection error" body={errorMessage} tone="error" />}
               {!sessionLoading && !errorMessage && !activeSessionId && <SystemMessage title="No active session" body="Create or activate a live session before messages can appear." />}
@@ -338,28 +379,78 @@ export default function LivePage() {
                   </article>
                 );
               })}
+              </div>
             </div>
           </div>
 
-          <form onSubmit={sendMessage} className="relative z-20 border-t border-[#2e2e2e] bg-[#181818] pt-4">
-            <div className="flex min-h-[58px] border border-[#2e2e2e] bg-[#171717] focus-within:border-[rgba(222,247,103,0.5)]">
-              <input
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                placeholder={activeSessionId ? 'Type message to everyone' : 'No active session'}
-                disabled={!activeSessionId || addMessageLoading}
-                className="h-[58px] min-w-0 flex-1 bg-transparent px-4 text-[13px] leading-6 text-white outline-none placeholder:text-[#5b5b5b] disabled:cursor-not-allowed disabled:text-[#5b5b5b]"
-                maxLength={500}
-              />
+          <form onSubmit={sendMessage} className="relative z-20 shrink-0 border-t border-[#2e2e2e] bg-[#181818] pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-4">
+            <div className="flex items-stretch gap-2">
+              <div ref={reactionsRef} className="relative shrink-0 self-end">
+                {floatingReactions.map((reaction, index) => (
+                  <span
+                    key={reaction.id}
+                    className="pointer-events-none absolute bottom-full left-1/2 z-30 -translate-x-1/2 animate-[reactionFloat_1.8s_ease-out_forwards] text-[22px]"
+                    style={{ marginBottom: 8 + index * 6 }}
+                    aria-hidden
+                  >
+                    {reaction.emoji}
+                  </span>
+                ))}
 
-              <button
-                type="submit"
-                disabled={!activeSessionId || addMessageLoading || input.trim().length === 0}
-                className="grid w-14 place-items-center border-l border-[#2e2e2e] text-[#929292] disabled:cursor-not-allowed disabled:opacity-30 active:bg-[#ff6a6a] active:text-[#171717]"
-                aria-label="Send message"
-              >
-                <Send size={18} />
-              </button>
+                {reactionsOpen && (
+                  <div
+                    className="absolute bottom-full left-0 z-40 mb-2 flex flex-col-reverse gap-1.5 border border-[#2e2e2e] bg-[#171717] p-1.5"
+                    role="menu"
+                    aria-label="Reactions"
+                  >
+                    {REACTIONS.map((reaction) => (
+                      <button
+                        key={reaction.id}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => triggerReaction(reaction.emoji)}
+                        className="grid h-11 w-11 place-items-center text-[22px] active:bg-[#ff6a6a]"
+                        aria-label={reaction.label}
+                      >
+                        {reaction.emoji}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setReactionsOpen((open) => !open)}
+                  className={`grid h-[58px] w-12 place-items-center border bg-[#171717] text-[#929292] active:border-[rgba(222,247,103,0.5)] active:text-[#DEF767] ${
+                    reactionsOpen ? 'border-[rgba(222,247,103,0.5)] text-[#DEF767]' : 'border-[#2e2e2e]'
+                  }`}
+                  aria-label="Add reaction"
+                  aria-expanded={reactionsOpen}
+                  aria-haspopup="menu"
+                >
+                  <Smile size={20} aria-hidden />
+                </button>
+              </div>
+
+              <div className="flex min-h-[58px] min-w-0 flex-1 border border-[#2e2e2e] bg-[#171717] focus-within:border-[rgba(222,247,103,0.5)]">
+                <input
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  placeholder={activeSessionId ? 'Type message to everyone' : 'No active session'}
+                  disabled={!activeSessionId || addMessageLoading}
+                  className="h-[58px] min-w-0 flex-1 bg-transparent px-4 text-[13px] leading-6 text-white outline-none placeholder:text-[#5b5b5b] disabled:cursor-not-allowed disabled:text-[#5b5b5b]"
+                  maxLength={500}
+                />
+
+                <button
+                  type="submit"
+                  disabled={!activeSessionId || addMessageLoading || input.trim().length === 0}
+                  className="grid w-14 shrink-0 place-items-center border-l border-[#2e2e2e] text-[#929292] disabled:cursor-not-allowed disabled:opacity-30 active:bg-[#ff6a6a] active:text-[#171717]"
+                  aria-label="Send message"
+                >
+                  <Send size={18} />
+                </button>
+              </div>
             </div>
 
             <div className="mt-3 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">
@@ -389,6 +480,21 @@ export default function LivePage() {
           to {
             opacity: 1;
             transform: translateY(0);
+          }
+        }
+
+        @keyframes reactionFloat {
+          0% {
+            opacity: 0;
+            transform: translate(-50%, 12px) scale(0.85);
+          }
+          15% {
+            opacity: 1;
+            transform: translate(-50%, 0) scale(1);
+          }
+          100% {
+            opacity: 0;
+            transform: translate(-50%, -72px) scale(1.1);
           }
         }
       `}</style>
