@@ -1,6 +1,13 @@
 "use client";
 
 import React from "react";
+import {
+  GamePanel,
+  GameShell,
+  GameStats,
+  gameButtonPrimary,
+  gameButtonSecondary,
+} from "../_components/GameShell";
 
 type Phase = "idle" | "showing" | "input" | "success" | "fail";
 
@@ -18,7 +25,7 @@ function makeNumber(length: number) {
   return result;
 }
 
-const NumberMemoryGame: React.FC = () => {
+function NumberMemoryGame() {
   const [level, setLevel] = React.useState(1);
   const [phase, setPhase] = React.useState<Phase>("idle");
   const [target, setTarget] = React.useState("");
@@ -49,23 +56,26 @@ const NumberMemoryGame: React.FC = () => {
     return Math.max(MIN_SHOW_MS, BASE_SHOW_MS - (currentLevel - 1) * 65);
   }, []);
 
-  const startRound = React.useCallback((nextLevel = level) => {
-    clearTimers();
+  const startRound = React.useCallback(
+    (nextLevel = level) => {
+      clearTimers();
 
-    const nextTarget = makeNumber(nextLevel);
-    setLevel(nextLevel);
-    setTarget(nextTarget);
-    setVisibleNumber(nextTarget);
-    setInputValue("");
-    setPhase("showing");
+      const nextTarget = makeNumber(nextLevel);
+      setLevel(nextLevel);
+      setTarget(nextTarget);
+      setVisibleNumber(nextTarget);
+      setInputValue("");
+      setPhase("showing");
 
-    const hideTimer = window.setTimeout(() => {
-      setVisibleNumber("");
-      setPhase("input");
-    }, showDurationForLevel(nextLevel));
+      const hideTimer = window.setTimeout(() => {
+        setVisibleNumber("");
+        setPhase("input");
+      }, showDurationForLevel(nextLevel));
 
-    timersRef.current.push(hideTimer);
-  }, [clearTimers, level, showDurationForLevel]);
+      timersRef.current.push(hideTimer);
+    },
+    [clearTimers, level, showDurationForLevel],
+  );
 
   const handleStart = React.useCallback(() => {
     startRound(1);
@@ -106,120 +116,99 @@ const NumberMemoryGame: React.FC = () => {
   }, [clearTimers]);
 
   return (
-    <div className="flex-1 flex flex-col w-full h-full gap-4">
-      <div className="flex flex-1 flex-col items-center justify-start gap-6 px-6 py-6 text-center">
-        <div className="flex w-full max-w-2xl items-center justify-between gap-6">
-          <div className="text-left">
-            <div className="font-display text-2xl tracking-[0.18em]">Number Memory</div>
-            <div className="mt-1 font-mono text-[12px] text-uxism-muted">Remember the number before it disappears.</div>
-          </div>
+    <>
+      <GameStats levelValue={level} bestValue={bestLevel || "—"} />
 
-          <div className="flex items-end gap-4">
-            <div className="font-mono text-[12px] text-uxism-muted">level</div>
-            <div className="font-display text-3xl tabular-nums">{level}</div>
-            <div className="ml-4 font-mono text-[12px] text-uxism-muted">best</div>
-            <div className="font-display text-2xl tabular-nums">{bestLevel}</div>
+      <GamePanel className="min-h-[260px] flex flex-col items-center justify-center text-center">
+        {phase === "idle" && (
+          <div className="flex flex-col items-center gap-6">
+            <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]">one number at a time</p>
+            <button type="button" onClick={handleStart} className={gameButtonPrimary}>
+              start
+            </button>
           </div>
-        </div>
+        )}
 
-        <div className="mt-4 flex min-h-[260px] w-full max-w-2xl flex-col items-center justify-center border border-uxism-border bg-uxism-base-bg px-6 py-8 text-center">
-          {phase === "idle" && (
-            <div className="flex flex-col items-center gap-6">
-              <div className="font-mono text-[12px] uppercase tracking-[0.3em] text-uxism-muted">one number at a time</div>
-              <button
-                type="button"
-                onClick={handleStart}
-                className="px-6 py-3 bg-uxism-primary text-uxism-base-bg font-mono text-[12px] uppercase tracking-[0.3em] transition-colors hover:bg-uxism-lime"
-              >
-                start
+        {phase === "showing" && (
+          <div className="flex flex-col items-center gap-5">
+            <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]">memorize</p>
+            <p className="font-serif text-5xl tabular-nums uppercase tracking-[0.04em] text-white sm:text-6xl">
+              {visibleNumber}
+            </p>
+          </div>
+        )}
+
+        {phase === "input" && (
+          <div className="flex w-full max-w-md flex-col items-center gap-5">
+            <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]">enter the number</p>
+            <form
+              className="flex w-full flex-col gap-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                handleSubmit();
+              }}
+            >
+              <input
+                ref={inputRef}
+                value={inputValue}
+                onChange={(event) => setInputValue(event.target.value.replace(/\D/g, ""))}
+                inputMode="numeric"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+                className="w-full border border-[#2e2e2e] bg-transparent px-4 py-4 text-center font-serif text-4xl tabular-nums uppercase tracking-[0.04em] text-white outline-none placeholder:text-[#5b5b5b] focus:border-[rgba(222,247,103,0.5)]"
+                placeholder=""
+                aria-label="Enter remembered number"
+              />
+              <button type="submit" className={gameButtonSecondary}>
+                submit
+              </button>
+            </form>
+          </div>
+        )}
+
+        {phase === "success" && (
+          <div className="flex flex-col items-center gap-5">
+            <p className="font-serif text-4xl uppercase tracking-[0.04em] text-[#DEF767]">correct</p>
+            <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]">next number incoming</p>
+          </div>
+        )}
+
+        {phase === "fail" && (
+          <div className="flex flex-col items-center gap-5">
+            <p className="font-serif text-4xl uppercase tracking-[0.04em] text-[#ff6a6a]">wrong</p>
+            <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]">answer was {target}</p>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={handleRetry} className={gameButtonPrimary}>
+                retry
+              </button>
+              <button type="button" onClick={handleReset} className={gameButtonSecondary}>
+                reset
               </button>
             </div>
-          )}
+          </div>
+        )}
+      </GamePanel>
 
-          {phase === "showing" && (
-            <div className="flex flex-col items-center gap-5">
-              <div className="font-mono text-[12px] uppercase tracking-[0.3em] text-uxism-muted">memorize</div>
-              <div className="font-display text-6xl sm:text-7xl tabular-nums tracking-[0.08em] text-uxism-primary">{visibleNumber}</div>
-            </div>
-          )}
-
-          {phase === "input" && (
-            <div className="flex w-full max-w-md flex-col items-center gap-5">
-              <div className="font-mono text-[12px] uppercase tracking-[0.3em] text-uxism-muted">enter the number</div>
-              <form
-                className="flex w-full flex-col gap-4"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  handleSubmit();
-                }}
-              >
-                <input
-                  ref={inputRef}
-                  value={inputValue}
-                  onChange={(event) => setInputValue(event.target.value.replace(/\D/g, ""))}
-                  inputMode="numeric"
-                  autoComplete="off"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  className="w-full border border-uxism-border bg-transparent px-4 py-4 text-center font-display text-4xl tabular-nums tracking-[0.12em] text-uxism-primary outline-none placeholder:text-uxism-muted/40 focus:border-uxism-lime"
-                  placeholder=""
-                  aria-label="Enter remembered number"
-                />
-                <button
-                  type="submit"
-                  className="px-6 py-3 border border-uxism-border font-mono text-[12px] uppercase tracking-[0.3em] transition-colors hover:bg-uxism-deep-bg hover:text-uxism-base-bg"
-                >
-                  submit
-                </button>
-              </form>
-            </div>
-          )}
-
-          {phase === "success" && (
-            <div className="flex flex-col items-center gap-5">
-              <div className="font-display text-4xl uppercase tracking-[0.2em] text-uxism-deep-bg">correct</div>
-              <div className="font-mono text-[12px] uppercase tracking-[0.3em] text-uxism-muted">next number incoming</div>
-            </div>
-          )}
-
-          {phase === "fail" && (
-            <div className="flex flex-col items-center gap-5">
-              <div className="font-display text-4xl uppercase tracking-[0.2em] text-uxism-deep-bg">wrong</div>
-              <div className="font-mono text-[12px] uppercase tracking-[0.3em] text-uxism-muted">answer was {target}</div>
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={handleRetry}
-                  className="px-5 py-3 bg-uxism-primary text-uxism-base-bg font-mono text-[12px] uppercase tracking-[0.3em] transition-colors hover:bg-uxism-lime"
-                >
-                  retry
-                </button>
-                <button
-                  type="button"
-                  onClick={handleReset}
-                  className="px-5 py-3 border border-uxism-border font-mono text-[12px] uppercase tracking-[0.3em] transition-colors hover:bg-uxism-deep-bg hover:text-uxism-base-bg"
-                >
-                  reset
-                </button>
-              </div>
-            </div>
-          )}
+      {phase !== "idle" && phase !== "fail" && (
+        <div className="mt-4 flex justify-center">
+          <button type="button" onClick={handleReset} className={gameButtonSecondary}>
+            reset
+          </button>
         </div>
-
-        <div className="flex items-center gap-3">
-          {phase !== "idle" && phase !== "fail" && (
-            <button
-              type="button"
-              onClick={handleReset}
-              className="px-4 py-2 border border-uxism-border font-mono text-[11px] uppercase tracking-[0.3em] transition-colors hover:bg-uxism-deep-bg hover:text-uxism-base-bg"
-            >
-              reset
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
+      )}
+    </>
   );
-};
+}
 
-export default NumberMemoryGame;
+export default function NumberMemoryPage() {
+  return (
+    <GameShell
+      meta="UXATHON / GAMES / NUMBER"
+      title="Number Memory"
+      description="Remember the number before it disappears."
+    >
+      <NumberMemoryGame />
+    </GameShell>
+  );
+}
