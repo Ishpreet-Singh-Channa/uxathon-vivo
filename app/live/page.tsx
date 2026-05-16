@@ -1,8 +1,8 @@
 "use client";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { gql } from "@apollo/client";
 import { useMutation, useSubscription } from "@apollo/client/react";
-import { ArrowLeft, ArrowUp, Plus, Send, Smile, Users } from "lucide-react";
+import { ArrowLeft, ArrowUp, MessageCircle, Plus, Send, Smile, Users, X } from "lucide-react";
 
 const REACTIONS = [
     { id: "heart", emoji: "❤️", label: "Heart" },
@@ -14,6 +14,27 @@ type FloatingReaction = {
     id: string;
     emoji: string;
 };
+
+type PollOption = {
+    id: string;
+    option: string;
+};
+
+type LivePoll = {
+    id: string;
+    title: string;
+    created_at: string;
+    ends_at: string;
+    poll_options: PollOption[];
+};
+
+const MUTATION_CREATE_QUESTION = gql`
+    mutation CreateQuestion($sessionId: uuid!, $question: String!) {
+        insert_live_questions_one(object: { session_id: $sessionId, question: $question }) {
+            question
+        }
+    }
+`;
 
 const POLL_SUBSCRIPTION = gql`
     subscription PollSubscription($sessionId: uuid!) {
@@ -39,7 +60,7 @@ const VOTE_MUTATION = gql`
 `;
 
 const CHAT_SUBSCRIPTION = gql`
-    subscription MySubscription($sessionId: uuid!) {
+    subscription ChatSubsScription($sessionId: uuid!) {
         live_chat(order_by: { created_at: desc }, where: { session_id: { _eq: $sessionId } }) {
             user {
                 name
@@ -88,10 +109,21 @@ type ChatSubscriptionData = {
     live_chat: ChatItem[];
 };
 
+type PollSubscriptionData = {
+    live_polls: LivePoll[];
+};
+
 type AddMessageVariables = {
     sessionId: string;
     message: string;
 };
+
+type VoteVariables = {
+    pollOptionId: string;
+    pollId: string;
+};
+
+type VotedOptionByPoll = Record<string, string>;
 
 function getInitials(name?: string | null) {
     if (!name || !name.trim()) return "UX";
@@ -110,14 +142,64 @@ function normalizeMessages(items?: ChatItem[]) {
     return items?.slice().reverse() ?? [];
 }
 
+function getVoteStorageKey(sessionId: string) {
+    return `uxism-live-votes:${sessionId}`;
+}
+
+function subscribeVoteStorage(onStoreChange: () => void) {
+    window.addEventListener("storage", onStoreChange);
+
+    return () => window.removeEventListener("storage", onStoreChange);
+}
+
+function readStoredVotes(sessionId?: string) {
+    if (!sessionId || typeof window === "undefined") return "{}";
+
+    return window.localStorage.getItem(getVoteStorageKey(sessionId)) ?? "{}";
+}
+
+function parseStoredVotes(value: string): VotedOptionByPoll {
+    try {
+        return JSON.parse(value);
+    } catch {
+        return {};
+    }
+}
+
+function getPollProgress(poll: LivePoll, currentTime: number) {
+    const startTime = new Date(poll.created_at).getTime();
+    const endTime = new Date(poll.ends_at).getTime();
+
+    if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || endTime <= startTime) return 100;
+
+    return Math.min(100, Math.max(0, ((currentTime - startTime) / (endTime - startTime)) * 100));
+}
+
+function getSecondsRemaining(endsAt: string, currentTime: number) {
+    const endTime = new Date(endsAt).getTime();
+
+    if (!Number.isFinite(endTime)) return 0;
+
+    return Math.max(0, Math.ceil((endTime - currentTime) / 1000));
+}
+
 export default function LivePage() {
     const [input, setInput] = useState("");
     const [reactionsOpen, setReactionsOpen] = useState(false);
     const [floatingReactions, setFloatingReactions] = useState<FloatingReaction[]>([]);
+    const [currentTime, setCurrentTime] = useState(() => Date.now());
+    const [voteLocksBySession, setVoteLocksBySession] = useState<Record<string, VotedOptionByPoll>>({});
+    const [pendingPollIds, setPendingPollIds] = useState<Set<string>>(() => new Set());
+    const [questionOpen, setQuestionOpen] = useState(false);
+    const [questionText, setQuestionText] = useState("");
+    const [questionSent, setQuestionSent] = useState(false);
     const scrollRef = useRef<HTMLDivElement | null>(null);
     const reactionsRef = useRef<HTMLDivElement | null>(null);
+    const reactionIdRef = useRef(0);
+    const questionResetRef = useRef<number | null>(null);
 
     const { data: sessionData, loading: sessionLoading, error: sessionError } = useSubscription<ActiveSessionData>(GET_ACTIVE_SESSION);
+    const [createQuestion] = useMutation(MUTATION_CREATE_QUESTION);
 
     const activeSession = sessionData?.live_sessions?.[0] ?? null;
     const activeSessionId = activeSession?.id;
@@ -131,20 +213,62 @@ export default function LivePage() {
         variables: activeSessionId ? { sessionId: activeSessionId } : undefined,
     });
 
-    const [addMessage, { loading: addMessageLoading, error: addMessageError }] = useMutation<unknown, AddMessageVariables>(MUTATION_ADD_MESSAGE);
+    const {
+        data: pollData,
+        loading: pollsLoading,
+        error: pollsError,
+    } = useSubscription<PollSubscriptionData>(POLL_SUBSCRIPTION, {
+        skip: !activeSessionId,
+        variables: activeSessionId ? { sessionId: activeSessionId } : undefined,
+    });
 
+    const [addMessage, { loading: addMessageLoading, error: addMessageError }] = useMutation<unknown, AddMessageVariables>(MUTATION_ADD_MESSAGE);
+    const [vote, { error: voteError }] = useMutation<unknown, VoteVariables>(VOTE_MUTATION);
+
+    const storedVoteSnapshot = useSyncExternalStore(
+        subscribeVoteStorage,
+        () => readStoredVotes(activeSessionId),
+        () => "{}",
+    );
+    const storedVotedOptionByPoll = useMemo(() => parseStoredVotes(storedVoteSnapshot), [storedVoteSnapshot]);
+    const votedOptionByPoll = useMemo(() => {
+        return { ...storedVotedOptionByPoll, ...(activeSessionId ? voteLocksBySession[activeSessionId] : undefined) };
+    }, [activeSessionId, storedVotedOptionByPoll, voteLocksBySession]);
     const messages = useMemo(() => normalizeMessages(data?.live_chat), [data?.live_chat]);
+    const activePolls = useMemo(() => {
+        return (
+            pollData?.live_polls?.filter((poll) => {
+                const endTime = new Date(poll.ends_at).getTime();
+
+                return Number.isFinite(endTime) && currentTime < endTime;
+            }) ?? []
+        );
+    }, [currentTime, pollData?.live_polls]);
+    const hasStackedPolls = activePolls.length > 1;
     const visibleUserCount = useMemo(() => Math.max(1, messages.length), [messages.length]);
 
     const errorMessage = sessionError?.message || messagesError?.message || addMessageError?.message || null;
+    const pollErrorMessage = pollsError?.message || voteError?.message || null;
 
-    const statusText = sessionLoading ? "loading session" : errorMessage ? "error" : !activeSessionId ? "no active session" : messagesLoading ? "loading messages" : "live";
+    const statusText = sessionLoading ? "loading session" : errorMessage ? "error" : !activeSessionId ? "no active session" : messagesLoading ? "loading messages" : pollsLoading ? "loading polls" : "live";
 
     useEffect(() => {
         requestAnimationFrame(() => {
             scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
         });
     }, [messages.length]);
+
+    useEffect(() => {
+        const interval = window.setInterval(() => setCurrentTime(Date.now()), 250);
+
+        return () => window.clearInterval(interval);
+    }, []);
+
+    useEffect(() => {
+        return () => {
+            if (questionResetRef.current) window.clearTimeout(questionResetRef.current);
+        };
+    }, []);
 
     useEffect(() => {
         if (!reactionsOpen) return;
@@ -164,7 +288,8 @@ export default function LivePage() {
     }, [reactionsOpen]);
 
     function triggerReaction(emoji: string) {
-        const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        reactionIdRef.current += 1;
+        const id = `reaction-${reactionIdRef.current}`;
         setFloatingReactions((prev) => [...prev, { id, emoji }]);
         setReactionsOpen(false);
         window.setTimeout(() => {
@@ -182,8 +307,62 @@ export default function LivePage() {
         setInput("");
     }
 
+    async function submitVote(poll: LivePoll, optionId: string) {
+        if (!activeSessionId || votedOptionByPoll[poll.id] || pendingPollIds.has(poll.id)) return;
+
+        const endTime = new Date(poll.ends_at).getTime();
+        if (!Number.isFinite(endTime) || currentTime >= endTime) return;
+
+        setPendingPollIds((prev) => new Set(prev).add(poll.id));
+
+        try {
+            await vote({ variables: { pollId: poll.id, pollOptionId: optionId } });
+
+            setVoteLocksBySession((prev) => {
+                const nextSessionVotes = { ...(prev[activeSessionId] ?? {}), [poll.id]: optionId };
+
+                try {
+                    window.localStorage.setItem(getVoteStorageKey(activeSessionId), JSON.stringify(nextSessionVotes));
+                } catch {
+                    // Local storage is only a UI lock; the backend vote mutation is the source of truth.
+                }
+
+                return { ...prev, [activeSessionId]: nextSessionVotes };
+            });
+        } finally {
+            setPendingPollIds((prev) => {
+                const next = new Set(prev);
+                next.delete(poll.id);
+                return next;
+            });
+        }
+    }
+
     function scrollToLatest() {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    }
+
+    function closeQuestionBox() {
+        if (questionResetRef.current) window.clearTimeout(questionResetRef.current);
+        setQuestionOpen(false);
+        setQuestionSent(false);
+        setQuestionText("");
+    }
+
+    function sendQuestion(event: FormEvent<HTMLFormElement>) {
+        event.preventDefault();
+
+        if (!questionText.trim() || questionSent) return;
+
+        setQuestionText("");
+        createQuestion({ variables: { sessionId: activeSessionId!, question: questionText.trim() } }).then(() => {
+            setQuestionSent(true);
+        });
+
+        questionResetRef.current = window.setTimeout(() => {
+            setQuestionOpen(false);
+            setQuestionSent(false);
+        }, 1400);
     }
 
     return (
@@ -196,6 +375,16 @@ export default function LivePage() {
             <div className="pointer-events-none fixed bottom-4 right-4 z-30 h-5 w-5 border-b border-r border-[#5b5b5b]" />
 
             <div className="pointer-events-none fixed left-1/2 top-[-140px] h-[340px] w-[340px] -translate-x-1/2 rounded-full bg-[radial-gradient(circle_at_30%_30%,#46B1FF,transparent_35%),radial-gradient(circle_at_70%_40%,#A259FF,transparent_35%),radial-gradient(circle_at_50%_70%,#ff6a6a,transparent_38%),radial-gradient(circle_at_80%_80%,#DEF767,transparent_30%)] opacity-25 blur-3xl" />
+
+            {(activePolls.length > 0 || pollErrorMessage) && (
+                <div className={`fixed left-5 right-5 top-5 z-40 mx-auto flex max-w-3xl flex-col overflow-y-auto sm:left-8 sm:right-8 ${hasStackedPolls ? "max-h-[68vh] gap-2" : "max-h-[52vh] gap-3"}`}>
+                    {pollErrorMessage && <div className="border border-[#2e2e2e] bg-[#171717] px-4 py-3 font-mono text-[10px] uppercase tracking-[0.14em] text-[#ff6a6a]">poll / {pollErrorMessage}</div>}
+
+                    {activePolls.map((poll) => (
+                        <LivePollPanel key={poll.id} poll={poll} currentTime={currentTime} selectedOptionId={votedOptionByPoll[poll.id]} isPending={pendingPollIds.has(poll.id)} compact={hasStackedPolls} onVote={submitVote} />
+                    ))}
+                </div>
+            )}
 
             <section className="relative z-10 mx-auto grid h-screen w-full max-w-5xl grid-rows-[1fr] px-5 py-5 md:px-10 lg:grid-cols-[1fr_160px] lg:gap-8">
                 <div className="grid min-h-0 grid-rows-[auto_1fr_auto] lg:max-w-[75%]">
@@ -322,6 +511,45 @@ export default function LivePage() {
                 </aside>
             </section>
 
+            <div className="fixed bottom-6 right-5 z-50 flex flex-col items-end">
+                {questionOpen && (
+                    <div className="mb-3 w-[min(calc(100vw-40px),320px)] border border-[#2e2e2e] bg-[#181818]">
+                        <div className="flex h-11 items-center justify-between border-b border-[#2e2e2e] px-3">
+                            <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#929292]">ask / live question</p>
+                            <button type="button" onClick={closeQuestionBox} className="grid h-8 w-8 place-items-center text-[#929292] active:bg-[#ff6a6a] active:text-[#171717]" aria-label="Close question box">
+                                <X size={15} />
+                            </button>
+                        </div>
+
+                        {questionSent ? (
+                            <div className="px-4 py-5">
+                                <p className="font-serif text-[18px] uppercase leading-tight tracking-[0.04em] text-white">Question Sent</p>
+                                <p className="mt-2 text-[13px] leading-5 text-[#929292]">Your question has been sent.</p>
+                            </div>
+                        ) : (
+                            <form onSubmit={sendQuestion} className="p-3">
+                                <textarea value={questionText} onChange={(event) => setQuestionText(event.target.value)} placeholder="Write your question" className="min-h-24 w-full resize-none border border-[#2e2e2e] bg-[#171717] px-3 py-3 text-[13px] leading-5 text-white outline-none placeholder:text-[#5b5b5b] focus:border-[rgba(222,247,103,0.5)]" maxLength={240} />
+
+                                <div className="mt-3 flex items-center justify-between gap-3">
+                                    <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">{questionText.length}/240</span>
+                                    <button type="submit" disabled={questionText.trim().length === 0} className="flex h-10 items-center gap-2 border border-[#2e2e2e] px-3 font-mono text-[10px] uppercase tracking-[0.14em] text-[#929292] disabled:cursor-not-allowed disabled:opacity-30 active:bg-[#ff6a6a] active:text-[#171717]">
+                                        <Send size={14} />
+                                        Send
+                                    </button>
+                                </div>
+                            </form>
+                        )}
+                    </div>
+                )}
+
+                {!questionOpen && (
+                    <button type="button" onClick={() => setQuestionOpen(true)} className="flex h-10 items-center gap-2 rounded-[24px] border border-[#5b5b5b] bg-[#181818] px-3 font-mono text-[10px] uppercase tracking-[0.14em] text-[#929292] active:border-[rgba(222,247,103,0.5)] active:text-[#DEF767]" aria-label="Ask a question">
+                        <MessageCircle size={15} />
+                        Ask me a question
+                    </button>
+                )}
+            </div>
+
             <style jsx global>{`
                 @keyframes fadeInUp {
                     from {
@@ -359,5 +587,41 @@ function SystemMessage({ title, body, tone = "muted" }: { title: string; body: s
             <p className={`font-mono text-[11px] uppercase tracking-[0.14em] ${tone === "error" ? "text-[#ff6a6a]" : "text-[#5b5b5b]"}`}>{title}</p>
             <p className="mt-2 text-[13px] leading-6 text-[#929292]">{body}</p>
         </div>
+    );
+}
+
+function LivePollPanel({ poll, currentTime, selectedOptionId, isPending, compact, onVote }: { poll: LivePoll; currentTime: number; selectedOptionId?: string; isPending: boolean; compact: boolean; onVote: (poll: LivePoll, optionId: string) => void }) {
+    const progress = getPollProgress(poll, currentTime);
+    const secondsRemaining = getSecondsRemaining(poll.ends_at, currentTime);
+    const hasVoted = Boolean(selectedOptionId);
+
+    return (
+        <section className="relative overflow-hidden border border-[#2e2e2e] bg-[#181818]/95 backdrop-blur-sm">
+            <div className={`grid gap-3 px-4 sm:grid-cols-[1fr_auto] sm:items-start sm:px-5 ${compact ? "pb-3 pt-3" : "pb-5 pt-4"}`}>
+                <div className="min-w-0">
+                    <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">poll / {hasVoted ? "vote locked" : isPending ? "sending vote" : `${secondsRemaining}s left`}</p>
+                    <h2 className={`mt-2 break-words font-serif uppercase leading-[1.05] tracking-[0.04em] text-white ${compact ? "overflow-hidden text-[16px] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:1] sm:text-[18px]" : "text-[20px] sm:text-[24px]"}`}>{poll.title}</h2>
+                </div>
+
+                <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b] sm:text-right">{poll.poll_options.length} options</p>
+            </div>
+
+            <div className={`grid gap-2 px-4 sm:grid-cols-2 sm:px-5 ${compact ? "pb-3" : "pb-5"}`}>
+                {poll.poll_options.map((option) => {
+                    const isSelected = selectedOptionId === option.id;
+                    const disabled = hasVoted || isPending;
+
+                    return (
+                        <button key={option.id} type="button" onClick={() => onVote(poll, option.id)} disabled={disabled} className={`border px-3 text-left transition-colors disabled:cursor-not-allowed ${compact ? "min-h-9 truncate py-2 text-[12px] leading-4" : "min-h-12 py-3 text-[13px] leading-5"} ${isSelected ? "border-[#ff6a6a] bg-[#ff6a6a] text-[#171717]" : "border-[#2e2e2e] bg-[#171717] text-[#929292] active:bg-[#ff6a6a] active:text-[#171717] disabled:text-[#5b5b5b]"}`} aria-pressed={isSelected}>
+                            {option.option}
+                        </button>
+                    );
+                })}
+            </div>
+
+            <div className="absolute bottom-0 left-0 h-1 bg-[#2e2e2e] right-0" aria-hidden>
+                <div className="h-full bg-white transition-[width] duration-200 ease-linear" style={{ width: `${progress}%` }} />
+            </div>
+        </section>
     );
 }
