@@ -34,7 +34,7 @@ export default function DashboardPage() {
 
             <section className="relative z-10 flex flex-1 items-center justify-center px-5 pb-28 pt-8">
                 <p className="max-w-[22ch] text-center font-mono text-[11px] uppercase leading-[1.6] tracking-[0.14em] text-[#5b5b5b] sm:text-[12px]">
-                    Adding more details soon
+                    UXATHON'26
                 </p>
             </section>
 
@@ -67,11 +67,10 @@ export default function DashboardPage() {
                             <li key={item.label}>
                                 <Link
                                     href={item.href}
-                                    className={`flex flex-col items-center gap-1.5 px-1 py-3 transition-colors ${
-                                        isActive
-                                            ? "text-[#ff6a6a]"
-                                            : "text-[#929292] active:text-[#DEF767]"
-                                    }`}
+                                    className={`flex flex-col items-center gap-1.5 px-1 py-3 transition-colors ${isActive
+                                        ? "text-[#ff6a6a]"
+                                        : "text-[#929292] active:text-[#DEF767]"
+                                        }`}
                                     aria-current={isActive ? "page" : undefined}
                                 >
                                     <Icon size={18} aria-hidden />
