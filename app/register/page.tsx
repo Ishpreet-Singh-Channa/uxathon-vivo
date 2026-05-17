@@ -91,12 +91,12 @@ export default function RegisterPage() {
                         <div className="border border-[#2e2e2e] bg-[#171717] divide-y divide-[#2e2e2e]">
                             <RegisterInput label="Full Name" name="name" type="text" placeholder="J. DOE" icon={<UserPlus size={16} />} required />
                             <RegisterInput label="Email Address" name="email" type="email" placeholder="YOU@DOMAIN.EXT" icon={<Mail size={16} />} required />
-                            <RegisterInput label="Access Key" name="password" type="password" placeholder="••••••••" icon={<Lock size={16} />} required />
+                            <RegisterInput label="Password" name="password" type="password" placeholder="••••••••" icon={<Lock size={16} />} required />
                             <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-[#2e2e2e]">
-                                <RegisterInput label="Signal Node" name="phone" type="tel" placeholder="+1 000 000 0000" icon={<Phone size={16} />} required />
+                                <RegisterInput label="Phone Number" name="phone" type="tel" placeholder="987********" icon={<Phone size={16} />} required />
                                 <RegisterInput label="Affiliation" name="company" type="text" placeholder="CORPORATION / ORG" icon={<Briefcase size={16} />} required />
                             </div>
-                            <RegisterInput label="Core Competencies" name="skills" type="text" placeholder="UI, UX, NEXT.JS, SYSTEMS (COMMA SEPARATED)" icon={<Cpu size={16} />} required />
+                            <RegisterInput label="Skills" name="skills" type="text" placeholder="UI, UX...(COMMA SEPARATED)" icon={<Cpu size={16} />} required />
                         </div>
 
                         {error && (
