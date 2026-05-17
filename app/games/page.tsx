@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
+    ArrowLeft,
     Brain,
     Gavel,
     Gamepad2,
@@ -80,9 +81,13 @@ export default function GamesPage() {
             <PageDecor />
 
             <header className="relative z-20 flex shrink-0 items-center justify-between border-b border-[#2e2e2e] bg-[#181818]/95 px-5 py-4 backdrop-blur-[2px]">
-                <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292] sm:text-[12px]">
-                    UXISM<span className="text-[#5b5b5b]">/</span>UXATHON
-                </p>
+                <Link
+                    href="/dashboard"
+                    className="flex h-10 items-center gap-2 border border-[#2e2e2e] px-4 font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292] active:border-[rgba(222,247,103,0.5)] active:text-[#DEF767]"
+                >
+                    <ArrowLeft size={14} aria-hidden />
+                    Dashboard
+                </Link>
 
                 <Link
                     href="/profile"
@@ -118,16 +123,14 @@ export default function GamesPage() {
                                     role="option"
                                     aria-selected={isSelected}
                                     onClick={() => setSelectedId(game.id)}
-                                    className={`grid w-full min-h-[90px] grid-cols-[auto_1fr_auto] items-center gap-4 border border-[#2e2e2e] px-4 py-4 text-left transition-colors sm:px-5 ${
-                                        isSelected
+                                    className={`grid w-full min-h-[90px] grid-cols-[auto_1fr_auto] items-center gap-4 border border-[#2e2e2e] px-4 py-4 text-left transition-colors sm:px-5 ${isSelected
                                             ? "relative z-10 bg-[#ff6a6a] text-[#171717]"
                                             : "bg-[#181818] text-white active:bg-[#171717]"
-                                    }`}
+                                        }`}
                                 >
                                     <span
-                                        className={`grid h-11 w-11 place-items-center border ${
-                                            isSelected ? "border-[#171717]/30" : "border-[#2e2e2e]"
-                                        }`}
+                                        className={`grid h-11 w-11 place-items-center border ${isSelected ? "border-[#171717]/30" : "border-[#2e2e2e]"
+                                            }`}
                                     >
                                         <Icon
                                             size={20}
@@ -141,9 +144,8 @@ export default function GamesPage() {
                                             {game.title}
                                         </span>
                                         <span
-                                            className={`mt-1 block truncate font-mono text-[10px] uppercase tracking-[0.14em] ${
-                                                isSelected ? "text-[#171717]/70" : "text-[#5b5b5b]"
-                                            }`}
+                                            className={`mt-1 block truncate font-mono text-[10px] uppercase tracking-[0.14em] ${isSelected ? "text-[#171717]/70" : "text-[#5b5b5b]"
+                                                }`}
                                         >
                                             {game.meta}
                                         </span>
@@ -151,9 +153,8 @@ export default function GamesPage() {
 
                                     <Plus
                                         size={18}
-                                        className={`shrink-0 transition-transform duration-200 ${
-                                            isSelected ? "rotate-45 text-[#171717]" : "text-[#5b5b5b]"
-                                        }`}
+                                        className={`shrink-0 transition-transform duration-200 ${isSelected ? "rotate-45 text-[#171717]" : "text-[#5b5b5b]"
+                                            }`}
                                         aria-hidden
                                     />
                                 </button>
@@ -197,47 +198,6 @@ export default function GamesPage() {
                 aria-label="Dashboard navigation"
                 className="fixed bottom-0 left-0 right-0 z-20 border-t border-[#2e2e2e] bg-[#181818]/95 backdrop-blur-[2px] pb-[max(0.75rem,env(safe-area-inset-bottom))]"
             >
-                <ul className="grid grid-cols-4">
-                    {bottomNavItems.map((item) => {
-                        const Icon = item.icon;
-                        const isActive = item.href && pathname === item.href;
-
-                        if (!item.enabled) {
-                            return (
-                                <li key={item.label}>
-                                    <span
-                                        className="flex flex-col items-center gap-1.5 px-1 py-3 text-[#5b5b5b]"
-                                        aria-disabled="true"
-                                    >
-                                        <Icon size={18} aria-hidden />
-                                        <span className="font-mono text-[9px] uppercase tracking-[0.1em] sm:text-[10px]">
-                                            {item.label}
-                                        </span>
-                                    </span>
-                                </li>
-                            );
-                        }
-
-                        return (
-                            <li key={item.label}>
-                                <Link
-                                    href={item.href!}
-                                    className={`flex flex-col items-center gap-1.5 px-1 py-3 transition-colors ${
-                                        isActive
-                                            ? "text-[#ff6a6a]"
-                                            : "text-[#929292] active:text-[#DEF767]"
-                                    }`}
-                                    aria-current={isActive ? "page" : undefined}
-                                >
-                                    <Icon size={18} aria-hidden />
-                                    <span className="font-mono text-[9px] uppercase tracking-[0.1em] sm:text-[10px]">
-                                        {item.label}
-                                    </span>
-                                </Link>
-                            </li>
-                        );
-                    })}
-                </ul>
             </nav>
         </main>
     );
