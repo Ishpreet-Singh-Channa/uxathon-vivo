@@ -6,7 +6,6 @@ import { Gavel, Gamepad2, MessageCircle, User, Users } from "lucide-react";
 
 const bottomNavItems = [
     { label: "My Team", href: "/myteam", icon: Users, enabled: true },
-    { label: "Bidding", href: null, icon: Gavel, enabled: false },
     { label: "Games", href: "/games", icon: Gamepad2, enabled: true },
     { label: "Live Chat", href: "/live", icon: MessageCircle, enabled: true },
 ];
@@ -42,7 +41,7 @@ export default function DashboardPage() {
                 aria-label="Dashboard navigation"
                 className="fixed bottom-0 left-0 right-0 z-20 border-t border-[#2e2e2e] bg-[#181818]/95 backdrop-blur-[2px] pb-[max(0.75rem,env(safe-area-inset-bottom))]"
             >
-                <ul className="grid grid-cols-4">
+                <ul className="grid grid-cols-3">
                     {bottomNavItems.map((item) => {
                         const Icon = item.icon;
                         const isActive = item.href && pathname === item.href;
