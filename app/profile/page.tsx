@@ -231,7 +231,7 @@ export default function ProfilePage() {
                                     <>
                                         <ProfileRow label="Name" value={display.name} />
                                         <ProfileRow label="Email" value={display.email} />
-                                        <ProfileRow label="Phone number" value={display.phone} />
+                                        <ProfileRow label="Phone number (10-Digits)" value={display.phone} />
                                         <ProfileRow label="Company" value={display.company} />
                                         <div>
                                             <dt className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]">
