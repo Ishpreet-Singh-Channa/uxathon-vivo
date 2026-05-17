@@ -6,8 +6,31 @@ import { toPng } from "html-to-image";
 import { ArrowLeft, Download, Pencil, Save, X } from "lucide-react";
 import Field from "@/components/Field";
 import { useAuth } from "@/context/token-context";
+import { gql } from "@apollo/client";
+import { useMutation } from "@apollo/client/react";
 
 const PROFILE_STORAGE_KEY = "uxathon-player-profile";
+const UPDATE_PROFILE_MUTATION = gql`
+    mutation UpdateProfile($userId: uuid!, $name: String, $email: String, $company: String, $skills: [String!]) {
+        update_users_by_pk(pk_columns: { id: $userId }, _set: { name: $name, email: $email, company: $company, skills: $skills }) {
+            id
+        }
+    }
+`;
+
+type UpdateProfileMutationData = {
+    update_users_by_pk: {
+        id: string;
+    } | null;
+};
+
+type UpdateProfileMutationVariables = {
+    userId: string;
+    name?: string;
+    email?: string;
+    company?: string;
+    skills?: string[];
+};
 
 type PlayerProfile = {
     name: string;
@@ -82,6 +105,7 @@ function decodeToProfile(data: unknown): Partial<PlayerProfile> {
 
 export default function ProfilePage() {
     const auth = useAuth();
+    const [updateProfile] = useMutation<UpdateProfileMutationData, UpdateProfileMutationVariables>(UPDATE_PROFILE_MUTATION);
     const cardRef = useRef<HTMLDivElement>(null);
     const [profile, setProfile] = useState<PlayerProfile>(emptyProfile);
     const [draft, setDraft] = useState<PlayerProfile>(emptyProfile);
@@ -118,7 +142,17 @@ export default function ProfilePage() {
         setIsEditing(false);
     }
 
-    function saveProfile() {
+    function getUserId(): string {
+        const data = auth.getData() as {
+            "https://hasura.io/jwt/claims"?: {
+                "x-hasura-user-id"?: string;
+            };
+        };
+
+        return data?.["https://hasura.io/jwt/claims"]?.["x-hasura-user-id"] || "";
+    }
+
+    async function saveProfile() {
         const next = {
             ...draft,
             name: draft.name.trim(),
@@ -128,6 +162,20 @@ export default function ProfilePage() {
             skills: draft.skills.trim(),
             avatarUrl: draft.avatarUrl.trim(),
         };
+
+        const userId = getUserId();
+        if (userId) {
+            await updateProfile({
+                variables: {
+                    userId,
+                    name: next.name || undefined,
+                    email: next.email || undefined,
+                    company: next.company || undefined,
+                    skills: parseSkills(next.skills),
+                },
+            });
+        }
+
         localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(next));
         setProfile(next);
         setDraft(next);
@@ -196,17 +244,11 @@ export default function ProfilePage() {
                             <dl className="mt-8 space-y-5">
                                 {isEditing ? (
                                     <>
-                                        <Field label="Avatar URL">
-                                            <input type="url" value={draft.avatarUrl} onChange={(e) => updateDraft("avatarUrl", e.target.value)} placeholder="https://…" className={inputClass} />
-                                        </Field>
                                         <Field label="Name">
                                             <input type="text" value={draft.name} onChange={(e) => updateDraft("name", e.target.value)} placeholder="Your name" className={inputClass} />
                                         </Field>
                                         <Field label="Email">
                                             <input type="email" value={draft.email} onChange={(e) => updateDraft("email", e.target.value)} placeholder="you@company.com" className={inputClass} />
-                                        </Field>
-                                        <Field label="Phone number">
-                                            <input type="tel" value={draft.phone} onChange={(e) => updateDraft("phone", e.target.value)} placeholder="+1 000 000 0000" className={inputClass} />
                                         </Field>
                                         <Field label="Company">
                                             <input type="text" value={draft.company} onChange={(e) => updateDraft("company", e.target.value)} placeholder="Company name" className={inputClass} />
