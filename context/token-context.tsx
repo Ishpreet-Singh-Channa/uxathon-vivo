@@ -14,6 +14,7 @@ type RegisterInput = {
     phone: string;
     company: string;
     skills: string[];
+    image?: string;
 };
 
 type LoginResponse = {
@@ -67,6 +68,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         console.log("Login successful, received tokens:", data);
         localStorage.setItem(JWT_KEY, data.data["jwt-token"]);
         localStorage.setItem(REFRESH_KEY, data.data["refresh-token"]);
+        if (typeof window !== "undefined") {
+        localStorage.setItem(JWT_KEY, data.data["jwt-token"]);
+        localStorage.setItem(REFRESH_KEY, data.data["refresh-token"]);
+    }
         setRefresh((v) => v + 1);
         _startRefreshInterval(1000 * 60); // every one minute
     };
@@ -78,7 +83,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             body: JSON.stringify(input),
         });
         if (!response.ok) throw new Error("Registration failed");
+        console.log("in token-context.tsx response:", response)
         const data = await response.json();
+        console.log("in token-context.tsx data:", data)
 
         localStorage.setItem(JWT_KEY, data.data["jwt-token"]);
         localStorage.setItem(REFRESH_KEY, data.data["refresh-token"]);
@@ -86,8 +93,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         _startRefreshInterval(1000 * 60); // every one minute
     };
 
-    const getJwt = () => localStorage.getItem(JWT_KEY);
-    const getRefreshToken = () => localStorage.getItem(REFRESH_KEY);
+    // const getJwt = () => localStorage.getItem(JWT_KEY);
+    const getJwt = () => {
+    if (typeof window === "undefined") return null;
+    return localStorage.getItem(JWT_KEY);
+};
+    // const getRefreshToken = () => localStorage.getItem(REFRESH_KEY);
+    const getRefreshToken = () => {
+    if (typeof window === "undefined") return null;
+    return localStorage.getItem(REFRESH_KEY);
+};
     const getData = (): JwtPayload | null => {
         const token = getJwt();
         if (!token) return null;
@@ -100,24 +115,68 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
     };
 
+
+    // const refresh = async () => {
+    //     const refreshToken = getRefreshToken();
+    //     if (!refreshToken) return;
+    //     const response = await fetch(process.env.NEXT_PUBLIC_BACKEND_URL + "/users/refresh-token", {
+    //         method: "POST",
+    //         headers: { "Content-Type": "application/json" },
+    //         body: JSON.stringify({ refresh_token: refreshToken }),
+    //     });
+    //     if (!response.ok) {
+    //         logout();
+    //         return;
+    //     }
+    //     const data: LoginResponse = await response.json();
+    //     localStorage.setItem(JWT_KEY, data.data["jwt-token"]);
+    //     localStorage.setItem(REFRESH_KEY, data.data["refresh-token"]);
+    //     setRefresh((v) => v + 1);
+    //     _startRefreshInterval(1000 * 60); // every one minute
+    // };
+
     const refresh = async () => {
-        const refreshToken = getRefreshToken();
-        if (!refreshToken) return;
-        const response = await fetch(process.env.NEXT_PUBLIC_BACKEND_URL + "/users/refresh-token", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ refresh_token: refreshToken }),
-        });
-        if (!response.ok) {
-            logout();
-            return;
+        // 1. Isolate the core logic
+        const performRefresh = async () => {
+            // IMPORTANT: We call getRefreshToken() INSIDE the lock.
+            // This ensures that if another tab just finished refreshing the token, 
+            // this tab will grab the newly updated token from localStorage, 
+            // rather than using a stale one.
+            const refreshToken = getRefreshToken();
+            if (!refreshToken) return;
+
+            const response = await fetch(process.env.NEXT_PUBLIC_BACKEND_URL + "/users/refresh-token", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ refresh_token: refreshToken }),
+            });
+
+            if (!response.ok) {
+                logout();
+                return;
+            }
+
+            const data: LoginResponse = await response.json();
+
+            localStorage.setItem(JWT_KEY, data.data["jwt-token"]);
+            localStorage.setItem(REFRESH_KEY, data.data["refresh-token"]);
+            setRefresh((v) => v + 1);
+            _startRefreshInterval(1000 * 60); // every one minute
+        };
+
+        // 2. Wrap execution using the exact same lock name as your register/login functions
+        if (navigator.locks) {
+            await navigator.locks.request("auth-lock", async () => {
+                await performRefresh();
+            });
+        } else {
+            // Fallback for unsupported browsers
+            console.warn("Web Locks API not supported. Running refresh without a lock.");
+            await performRefresh();
         }
-        const data: LoginResponse = await response.json();
-        localStorage.setItem(JWT_KEY, data.data["jwt-token"]);
-        localStorage.setItem(REFRESH_KEY, data.data["refresh-token"]);
-        setRefresh((v) => v + 1);
-        _startRefreshInterval(1000 * 60); // every one minute
     };
+
+
 
     const logout = () => {
         localStorage.removeItem(JWT_KEY);

@@ -4,7 +4,7 @@
 // import { motion, AnimatePresence } from "framer-motion";
 
 // export type TextEffect = "blur-reveal" | "masked-slide" | "highlight" | "marquee" | "scramble";
-// export type FontType = "serif" | "sans" | "mono" | "display";
+// export type FontType = "sans" | "sans" | "mono" | "display";
 
 // interface AnimatedBannerProps {
 //     text: string;
@@ -17,10 +17,10 @@
 // }
 
 // const fontStyleMap: Record<FontType, string> = {
-//     serif: "Georgia, serif",
-//     sans: "system-ui, -apple-system, sans-serif",
+//     sans: "Georgia, sans",
+//     sans: "system-ui, -apple-system, sans-sans",
 //     mono: "var(--font-mono), Courier New, Courier, monospace",
-//     display: 'Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif'
+//     display: 'Impact, Haettenschweiler, "Arial Narrow Bold", sans-sans'
 // };
 
 // export function AnimatedBanner({ text, effect, speed = 1, blurStrength = 12, font, fontSize, repeat = false }: AnimatedBannerProps) {
@@ -28,7 +28,7 @@
 //     const animBlur = Math.max(0, blurStrength);
 
 //     // Determine font family: use custom override if provided, otherwise default to effect preferences
-//     const defaultFont: FontType = effect === "scramble" ? "mono" : effect === "blur-reveal" ? "serif" : "sans";
+//     const defaultFont: FontType = effect === "scramble" ? "mono" : effect === "blur-reveal" ? "sans" : "sans";
 //     const selectedFont = fontStyleMap[font || defaultFont];
 
 //     // Calculate Marquee Rotation Speed (duration in seconds)
@@ -218,7 +218,7 @@ import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 export type TextEffect = "blur-reveal" | "masked-slide" | "highlight" | "marquee" | "scramble";
-export type FontType = "serif" | "sans" | "mono" | "display";
+export type FontType = "sans" | "sans" | "mono" | "display";
 
 interface AnimatedBannerProps {
     text: string;
@@ -232,10 +232,11 @@ interface AnimatedBannerProps {
 }
 
 const fontStyleMap: Record<FontType, string> = {
-    serif: "Georgia, serif",
-    sans: "system-ui, -apple-system, sans-serif",
+    // sans: "Georgia, sans",
+    // sans: "var(--font-geist-sans), system-ui, sans-sans",
+    sans: "system-ui, -apple-system, sans-sans",
     mono: "var(--font-mono), Courier New, Courier, monospace",
-    display: 'Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif'
+    display: 'Impact, Haettenschweiler, "Arial Narrow Bold", sans-sans'
 };
 
 export function AnimatedBanner({ text, effect, speed = 1, blurStrength = 12, font, fontSize, repeat = false, color = "#ffffff" }: AnimatedBannerProps) {
@@ -243,7 +244,7 @@ export function AnimatedBanner({ text, effect, speed = 1, blurStrength = 12, fon
     const animBlur = Math.max(0, blurStrength);
     console.log(color)
     // Determine font family: use custom override if provided, otherwise default to effect preferences
-    const defaultFont: FontType = effect === "scramble" ? "mono" : effect === "blur-reveal" ? "serif" : "sans";
+    const defaultFont: FontType = effect === "scramble" ? "mono" : effect === "blur-reveal" ? "sans" : "sans";
     const selectedFont = fontStyleMap[font || defaultFont];
 
     // Calculate Marquee Rotation Speed (duration in seconds)

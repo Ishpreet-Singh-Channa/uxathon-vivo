@@ -17,7 +17,7 @@ export default function HomePage() {
                 <div className="flex w-full max-w-md flex-col items-center text-center">
                     <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">UXISM / SPLASH / 2026</p>
 
-                    <h1 className="mt-4 font-serif text-[clamp(2.5rem,12vw,4.5rem)] uppercase leading-[0.92] tracking-[0.02em] text-white">
+                    <h1 className="mt-4 font-sans text-[clamp(2.5rem,12vw,4.5rem)] uppercase leading-[0.92] tracking-[0.02em] text-white">
                         UXATHON&apos;26
                     </h1>
 

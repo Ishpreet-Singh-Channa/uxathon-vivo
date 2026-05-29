@@ -1,0 +1,246 @@
+.container {
+  position: relative;
+  z-index: 2;
+  padding: 40px 20px;
+  min-height: 100svh;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.domain {
+  color: var(--secondary);
+}
+
+.sep {
+  color: var(--border);
+}
+
+.heading {
+  font-family: var(--font-display);
+  font-size: clamp(24px, 7vw, 44px);
+  color: var(--primary);
+  margin-bottom: 8px;
+}
+
+.sub {
+  font-size: 13px;
+  color: var(--secondary);
+  margin-bottom: 4px;
+}
+
+.hint {
+  color: var(--muted);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+  margin-top: 32px;
+}
+
+@media (min-width: 600px) {
+  .grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+  }
+}
+
+@media (min-width: 900px) {
+  .grid {
+    grid-template-columns: repeat(5, 1fr);
+    gap: 24px;
+  }
+}
+
+.personaCard {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  border-radius: 24px;
+  border: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  cursor: pointer;
+  transition: transform 0.2s, filter 0.2s;
+  padding: 24px 16px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.personaCard:hover:not(.claimed) {
+  transform: translateY(-8px);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.personaCard:active:not(.claimed) {
+  transform: scale(0.95) translateY(-4px);
+}
+
+.personaCard.claimed {
+  cursor: not-allowed;
+  filter: grayscale(0.5);
+  opacity: 0.6;
+}
+
+.assetContainer {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  margin-bottom: 8px;
+  width: 100%;
+}
+
+.asset {
+  width: 200%;
+  height: auto;
+  z-index: 2;
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.15));
+}
+
+.personaCard:hover .asset {
+  transform: scale(1.1);
+}
+
+.cardName {
+  font-family: var(--font-display);
+  font-size: 15px;
+  line-height: 1.1;
+  color: #000;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: -0.02em;
+  z-index: 2;
+  text-shadow: none;
+  text-align: center;
+}
+
+.claimedOverlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 4;
+}
+
+.claimedStamp {
+  border: 2px solid #ef5350;
+  color: #ef5350;
+  padding: 4px 12px;
+  font-family: var(--font-mono);
+  font-weight: 900;
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  transform: rotate(-15deg);
+  border-radius: 4px;
+  box-shadow: 0 0 10px rgba(239, 83, 80, 0.4);
+}
+
+/* Scanner Loading Screen */
+.scannerOverlay {
+  position: fixed;
+  inset: 0;
+  background: #181818;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.scanLine {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #DEF767, transparent);
+  box-shadow: 0 0 20px #DEF767;
+  animation: scan 3s linear infinite;
+  opacity: 0.5;
+  z-index: 1;
+}
+
+@keyframes scan {
+  0% { top: 0; }
+  100% { top: 100%; }
+}
+
+.technicalInfo {
+  text-align: center;
+  z-index: 2;
+  max-width: 80%;
+}
+
+.flicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: #DEF767;
+  letter-spacing: 0.3em;
+  animation: flicker 0.5s infinite alternate;
+}
+
+@keyframes flicker {
+  0% { opacity: 1; }
+  50% { opacity: 0.4; }
+  100% { opacity: 0.8; }
+}
+
+.coordinates {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: #5b5b5b;
+  letter-spacing: 0.2em;
+  margin-top: 12px;
+  display: block;
+}
+
+/* Header & Back Button */
+.header {
+  margin-bottom: 24px;
+}
+
+.backButton {
+  background: none;
+  border: none;
+  color: #929292;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.2s;
+}
+
+.backButton:hover {
+  color: #DEF767;
+}

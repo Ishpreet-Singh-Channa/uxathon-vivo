@@ -152,6 +152,20 @@ export default function ProfilePage() {
         return data?.["https://hasura.io/jwt/claims"]?.["x-hasura-user-id"] || "";
     }
 
+
+    function getImageUrl(imagePath?: string | null) {
+    if (!imagePath) return "";
+    
+    // If it's already a full URL (like Dicebear) or a base64 string, return it as is
+    if (imagePath.startsWith("http") || imagePath.startsWith("data:")) {
+        return imagePath;
+    }
+
+    // Otherwise, append the backend URL and the /uploads/ prefix
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000";
+    return `${backendUrl}/uploads/${imagePath}`;
+}
+
     async function saveProfile() {
         const next = {
             ...draft,
@@ -233,9 +247,9 @@ export default function ProfilePage() {
                             <div className="flex flex-col items-center">
                                 {display.avatarUrl ? (
                                     // eslint-disable-next-line @next/next/no-img-element
-                                    <img src={display.avatarUrl} alt="" className="h-24 w-24 rounded-full border border-[#2e2e2e] object-cover" />
+                                    <img src={getImageUrl(display.avatarUrl)} alt="" className="h-24 w-24 rounded-full border border-[#2e2e2e] object-cover" />
                                 ) : (
-                                    <div className="grid h-24 w-24 place-items-center rounded-full border border-[#2e2e2e] bg-[#181818] font-serif text-[28px] uppercase tracking-[0.04em] text-[#ff6a6a]">{initials}</div>
+                                    <div className="grid h-24 w-24 place-items-center rounded-full border border-[#2e2e2e] bg-[#181818] font-sans text-[28px] uppercase tracking-[0.04em] text-[#ff6a6a]">{initials}</div>
                                 )}
 
                                 <p className="mt-4 font-mono text-[10px] uppercase tracking-[0.18em] text-[#5b5b5b]">UXATHON / PLAYER CARD</p>

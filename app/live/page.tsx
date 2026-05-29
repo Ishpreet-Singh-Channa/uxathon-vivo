@@ -349,13 +349,31 @@ export default function LivePage() {
         setQuestionText("");
     }
 
+    // function sendQuestion(event: FormEvent<HTMLFormElement>) {
+    //     event.preventDefault();
+
+    //     if (!questionText.trim() || questionSent) return;
+
+    //     setQuestionText("");
+    //     createQuestion({ variables: { sessionId: activeSessionId!, question: questionText.trim() } }).then(() => {
+    //         setQuestionSent(true);
+    //     });
+
+    //     questionResetRef.current = window.setTimeout(() => {
+    //         setQuestionOpen(false);
+    //         setQuestionSent(false);
+    //     }, 1400);
+    // }
+
+
     function sendQuestion(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
 
-        if (!questionText.trim() || questionSent) return;
+        // Add the activeSessionId check here!
+        if (!questionText.trim() || questionSent || !activeSessionId) return;
 
         setQuestionText("");
-        createQuestion({ variables: { sessionId: activeSessionId!, question: questionText.trim() } }).then(() => {
+        createQuestion({ variables: { sessionId: activeSessionId, question: questionText.trim() } }).then(() => {
             setQuestionSent(true);
         });
 
@@ -364,6 +382,24 @@ export default function LivePage() {
             setQuestionSent(false);
         }, 1400);
     }
+
+
+    function getImageUrl(imagePath?: string | null) {
+    if (!imagePath) return "";
+    
+    // If it's already a full URL (like Dicebear) or a base64 string, return it as is
+    if (imagePath.startsWith("http") || imagePath.startsWith("data:")) {
+        return imagePath;
+    }
+
+    // Otherwise, append the backend URL and the /uploads/ prefix
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000";
+    return `${backendUrl}/uploads/${imagePath}`;
+}
+
+    
+
+    
 
     return (
         <main className="h-screen overflow-hidden bg-[#181818] text-white selection:bg-[#ff6a6a] selection:text-[#171717]">
@@ -410,7 +446,7 @@ export default function LivePage() {
                         <div className="mt-7 flex items-end justify-between gap-6">
                             <div>
                                 <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">UXISM / LIVE CHAT / EVENT ROOM</p>
-                                <h1 className="mt-3 font-serif text-[36px] uppercase leading-[0.92] tracking-[0.02em] text-white sm:text-[48px]">Signal Room</h1>
+                                <h1 className="mt-3 font-sans text-[36px] uppercase leading-[0.92] tracking-[0.02em] text-white sm:text-[48px]">Signal Room</h1>
                             </div>
 
                             <div className="hidden text-right font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b] sm:block">
@@ -439,12 +475,12 @@ export default function LivePage() {
 
                                     return (
                                         <article key={`${index}-${name}-${chat.message}`} className="grid animate-[fadeInUp_260ms_ease-out] grid-cols-[48px_1fr] gap-3 border-b border-[#2e2e2e] px-4 py-4 sm:grid-cols-[56px_1fr] sm:px-5">
-                                            {profilePicture ? <img src={profilePicture} alt={`${name} avatar`} className="h-10 w-10 border border-[#2e2e2e] object-cover sm:h-11 sm:w-11" /> : <div className="grid h-10 w-10 place-items-center border border-[#2e2e2e] bg-[#181818] font-mono text-[11px] uppercase tracking-[0.08em] text-[#ff6a6a] sm:h-11 sm:w-11">{getInitials(name)}</div>}
+                                            {profilePicture ? <img src={getImageUrl(profilePicture)} alt={`${name} avatar`} className="h-10 w-10 border border-[#2e2e2e] object-cover sm:h-11 sm:w-11" /> : <div className="grid h-10 w-10 place-items-center border border-[#2e2e2e] bg-[#181818] font-mono text-[11px] uppercase tracking-[0.08em] text-[#ff6a6a] sm:h-11 sm:w-11">{getInitials(name)}</div>}
 
                                             <div className="min-w-0">
                                                 <div className="flex items-start justify-between gap-3">
                                                     <div className="min-w-0">
-                                                        <h2 className="truncate font-serif text-[16px] uppercase tracking-[0.04em] text-white">{name}</h2>
+                                                        <h2 className="truncate font-sans text-[16px] uppercase tracking-[0.04em] text-white">{name}</h2>
                                                         <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">participant</p>
                                                     </div>
 
@@ -523,7 +559,7 @@ export default function LivePage() {
 
                         {questionSent ? (
                             <div className="px-4 py-5">
-                                <p className="font-serif text-[18px] uppercase leading-tight tracking-[0.04em] text-white">Question Sent</p>
+                                <p className="font-sans text-[18px] uppercase leading-tight tracking-[0.04em] text-white">Question Sent</p>
                                 <p className="mt-2 text-[13px] leading-5 text-[#929292]">Your question has been sent.</p>
                             </div>
                         ) : (
@@ -600,7 +636,7 @@ function LivePollPanel({ poll, currentTime, selectedOptionId, isPending, compact
             <div className={`grid gap-3 px-4 sm:grid-cols-[1fr_auto] sm:items-start sm:px-5 ${compact ? "pb-3 pt-3" : "pb-5 pt-4"}`}>
                 <div className="min-w-0">
                     <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">poll / {hasVoted ? "vote locked" : isPending ? "sending vote" : `${secondsRemaining}s left`}</p>
-                    <h2 className={`mt-2 break-words font-serif uppercase leading-[1.05] tracking-[0.04em] text-white ${compact ? "overflow-hidden text-[16px] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:1] sm:text-[18px]" : "text-[20px] sm:text-[24px]"}`}>{poll.title}</h2>
+                    <h2 className={`mt-2 break-words font-sans uppercase leading-[1.05] tracking-[0.04em] text-white ${compact ? "overflow-hidden text-[16px] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:1] sm:text-[18px]" : "text-[20px] sm:text-[24px]"}`}>{poll.title}</h2>
                 </div>
 
                 <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b] sm:text-right">{poll.poll_options.length} options</p>

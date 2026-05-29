@@ -1,0 +1,31 @@
+{
+  "logos": {
+    "default": "/assets/logos/placeholder.svg"
+  },
+  "icons": {
+    "identity": "/assets/icons/placeholder.svg",
+    "description": "/assets/icons/placeholder.svg",
+    "scenario": "/assets/icons/placeholder.svg",
+    "task": "/assets/icons/placeholder.svg",
+    "task_flow": "/assets/icons/placeholder.svg",
+    "persuasion": "/assets/icons/placeholder.svg"
+  },
+  "avatars": {
+    "maria": "/assets/avatars/placeholder.svg",
+    "jaxon": "/assets/avatars/placeholder.svg",
+    "elara": "/assets/avatars/placeholder.svg",
+    "kai": "/assets/avatars/placeholder.svg"
+  },
+  "graphics": {
+    "starburst": "/assets/graphics/placeholder.svg"
+  },
+  "arrows": {
+    "identity": "/assets/arrows/placeholder.svg",
+    "description": "/assets/arrows/placeholder.svg",
+    "scenario": "/assets/arrows/placeholder.svg",
+    "task": "/assets/arrows/placeholder.svg",
+    "task_flow": "/assets/arrows/placeholder.svg",
+    "persuasion": "/assets/arrows/placeholder.svg"
+  }
+}
+

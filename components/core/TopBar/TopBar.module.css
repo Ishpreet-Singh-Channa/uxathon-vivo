@@ -1,0 +1,129 @@
+.bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(24, 24, 24, 0.92);
+  backdrop-filter: blur(10px);
+}
+
+.back {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px 6px;
+  font-family: var(--font-mono);
+  transition: color 0.12s;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.back:hover { color: var(--primary); }
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.domain  { color: var(--muted); flex-shrink: 0; }
+.sep     { color: var(--border); flex-shrink: 0; }
+.persona {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Progress pips (center) ── */
+.center {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  margin: 0 auto;
+}
+
+.pip {
+  display: block;
+  width: 18px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+  transition: background 0.25s ease;
+}
+
+.pipFilled {
+  background: var(--lime);
+  box-shadow: 0 0 5px rgba(222,247,103,0.5);
+}
+
+/* ── Right ── */
+.right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.layoutToggle {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+.layoutToggle:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.toggleOff {
+  opacity: 0.6;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.oppLabel {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  display: none; /* hidden on very small screens */
+}
+
+@media (min-width: 380px) {
+  .oppLabel { display: block; }
+}
+
+.userChip {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--secondary);
+  border: 1px solid var(--border);
+  padding: 2px 6px;
+  border-radius: 2px;
+  background: var(--deep-bg);
+  white-space: nowrap;
+}

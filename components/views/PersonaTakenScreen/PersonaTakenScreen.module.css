@@ -1,0 +1,93 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(24,24,24,0.96);
+}
+
+.card {
+  width: min(440px, 90vw);
+  padding: 36px 32px;
+  border: 1px solid var(--coral);
+  background: var(--deep-bg);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--coral);
+  text-transform: uppercase;
+}
+
+.personaBadge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid;
+  padding: 5px 12px;
+  width: fit-content;
+  opacity: 0.6;
+}
+
+.personaDot {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.personaName {
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: var(--secondary);
+}
+
+.heading {
+  font-family: var(--font-display);
+  font-size: clamp(22px, 3vw, 32px);
+  color: var(--primary);
+}
+
+.takenBy {
+  font-size: 13px;
+  color: var(--secondary);
+}
+
+.takenByUser {
+  color: var(--coral);
+  font-family: var(--font-mono);
+}
+
+.sub {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.actions { margin-top: 8px; }
+
+.primaryBtn {
+  width: 100%;
+  padding: 14px 20px;
+  background: transparent;
+  border: 1px solid var(--coral);
+  color: var(--coral);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.primaryBtn:hover {
+  background: var(--coral);
+  color: var(--base-bg);
+}

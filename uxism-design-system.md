@@ -47,7 +47,7 @@ triggers:
 ## Typography
 | Role | Typeface | Use |
 |---|---|---|
-| Display / nav labels | GROZEN MEDICAL (serif) | Wordmark, headings, nav items |
+| Display / nav labels | GROZEN MEDICAL (sans) | Wordmark, headings, nav items |
 | Body copy | Onest / Cygre (humanist sans) | All body text |
 | Metadata | Geist Mono | Coordinates, labels, meta |
 

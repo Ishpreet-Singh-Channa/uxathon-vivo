@@ -90,7 +90,7 @@ export default function UXISMLoginPage() {
                         <div className="flex items-start justify-between gap-6">
                             <div>
                                 <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">UXISM / LOGIN / 2026</p>
-                                <h1 className="mt-3 max-w-[10ch] font-serif text-[42px] uppercase leading-[0.92] tracking-[0.02em] text-white sm:text-[56px]">Return to System</h1>
+                                <h1 className="mt-3 max-w-[10ch] font-sans text-[42px] uppercase leading-[0.92] tracking-[0.02em] text-white sm:text-[56px]">Return to System</h1>
                             </div>
 
                             <button type="button" className="grid h-10 w-10 shrink-0 place-items-center rounded-[24px] border border-[#5b5b5b] bg-[#181818] text-[#929292] transition-colors active:border-[rgba(222,247,103,0.5)] active:text-[#DEF767] lg:hidden" aria-label="Open login map">
@@ -114,7 +114,7 @@ export default function UXISMLoginPage() {
                                 <motion.form key="login-form" onSubmit={submitLogin} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -14 }} transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }} className="space-y-8">
                                     <div>
                                         <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">Access Slab</p>
-                                        <h2 className="mt-2 font-serif text-2xl uppercase tracking-[0.04em] text-white">Login</h2>
+                                        <h2 className="mt-2 font-sans text-2xl uppercase tracking-[0.04em] text-white">Login</h2>
                                         <p className="mt-3 max-w-md text-[13px] leading-6 text-[#929292]">Enter your registered credentials. The interface stays sparse; validation appears only when needed.</p>
                                     </div>
 
@@ -161,7 +161,7 @@ export default function UXISMLoginPage() {
                                     <div className="grid h-10 w-10 place-items-center rounded-[24px] border border-[rgba(222,247,103,0.5)] text-[#DEF767]">
                                         <Check size={18} />
                                     </div>
-                                    <h2 className="mt-6 font-serif text-2xl uppercase tracking-[0.04em] text-white">Access Captured</h2>
+                                    <h2 className="mt-6 font-sans text-2xl uppercase tracking-[0.04em] text-white">Access Captured</h2>
                                     <p className="mt-3 max-w-md text-[13px] leading-6 text-[#929292]">Login payload is ready. Replace the console log with your backend authentication request.</p>
                                 </motion.div>
                             )}

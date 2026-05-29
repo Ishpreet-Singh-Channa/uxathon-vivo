@@ -132,7 +132,7 @@ function NumberMemoryGame() {
         {phase === "showing" && (
           <div className="flex flex-col items-center gap-5">
             <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]">memorize</p>
-            <p className="font-serif text-5xl tabular-nums uppercase tracking-[0.04em] text-white sm:text-6xl">
+            <p className="font-sans text-5xl tabular-nums uppercase tracking-[0.04em] text-white sm:text-6xl">
               {visibleNumber}
             </p>
           </div>
@@ -156,7 +156,7 @@ function NumberMemoryGame() {
                 autoComplete="off"
                 autoCorrect="off"
                 spellCheck={false}
-                className="w-full border border-[#2e2e2e] bg-transparent px-4 py-4 text-center font-serif text-4xl tabular-nums uppercase tracking-[0.04em] text-white outline-none placeholder:text-[#5b5b5b] focus:border-[rgba(222,247,103,0.5)]"
+                className="w-full border border-[#2e2e2e] bg-transparent px-4 py-4 text-center font-sans text-4xl tabular-nums uppercase tracking-[0.04em] text-white outline-none placeholder:text-[#5b5b5b] focus:border-[rgba(222,247,103,0.5)]"
                 placeholder=""
                 aria-label="Enter remembered number"
               />
@@ -169,14 +169,14 @@ function NumberMemoryGame() {
 
         {phase === "success" && (
           <div className="flex flex-col items-center gap-5">
-            <p className="font-serif text-4xl uppercase tracking-[0.04em] text-[#DEF767]">correct</p>
+            <p className="font-sans text-4xl uppercase tracking-[0.04em] text-[#DEF767]">correct</p>
             <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]">next number incoming</p>
           </div>
         )}
 
         {phase === "fail" && (
           <div className="flex flex-col items-center gap-5">
-            <p className="font-serif text-4xl uppercase tracking-[0.04em] text-[#ff6a6a]">wrong</p>
+            <p className="font-sans text-4xl uppercase tracking-[0.04em] text-[#ff6a6a]">wrong</p>
             <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]">answer was {target}</p>
             <div className="flex items-center gap-3">
               <button type="button" onClick={handleRetry} className={gameButtonPrimary}>

@@ -177,7 +177,7 @@ function ReactionTimeGame() {
         className={`flex min-h-[min(48vh,380px)] w-full flex-col items-center justify-center gap-4 border px-6 py-10 text-center transition-colors ${panelTone} cursor-pointer active:border-[rgba(222,247,103,0.5)]`}
       >
         <p className={`font-mono text-[11px] uppercase tracking-[0.14em] ${metaTone}`}>{panelLabel.kicker}</p>
-        <p className={`font-serif text-5xl uppercase leading-[0.95] tracking-[0.02em] sm:text-6xl ${titleTone}`}>
+        <p className={`font-sans text-5xl uppercase leading-[0.95] tracking-[0.02em] sm:text-6xl ${titleTone}`}>
           {panelLabel.title}
         </p>
         <p className={`max-w-[28ch] text-[13px] leading-6 ${hintTone}`}>{panelLabel.hint}</p>

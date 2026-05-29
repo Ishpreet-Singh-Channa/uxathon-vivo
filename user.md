@@ -205,7 +205,7 @@ export function GameShell({ meta, title, description, children }: GameShellProps
 
         <div className="mb-6">
           <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">{meta}</p>
-          <h1 className="mt-3 font-serif text-[32px] uppercase leading-[0.95] tracking-[0.02em] text-white sm:text-[40px]">
+          <h1 className="mt-3 font-sans text-[32px] uppercase leading-[0.95] tracking-[0.02em] text-white sm:text-[40px]">
             {title}
           </h1>
           <p className="mt-4 max-w-[34ch] text-[13px] leading-6 text-[#929292]">{description}</p>
@@ -277,11 +277,11 @@ export function GameStats({
     <div className="mb-4 grid grid-cols-2 gap-px border border-[#2e2e2e] bg-[#2e2e2e]">
       <div className="bg-[#171717]/70 px-4 py-3">
         <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">{levelLabel}</p>
-        <p className="mt-1 font-serif text-2xl tabular-nums uppercase tracking-[0.04em] text-white">{levelValue}</p>
+        <p className="mt-1 font-sans text-2xl tabular-nums uppercase tracking-[0.04em] text-white">{levelValue}</p>
       </div>
       <div className="bg-[#171717]/70 px-4 py-3">
         <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">{bestLabel}</p>
-        <p className="mt-1 font-serif text-2xl tabular-nums uppercase tracking-[0.04em] text-white">{bestValue}</p>
+        <p className="mt-1 font-sans text-2xl tabular-nums uppercase tracking-[0.04em] text-white">{bestValue}</p>
       </div>
     </div>
   );
@@ -535,7 +535,7 @@ function ChimpGame() {
                     ].join(" ")}
                     aria-label={`chimp-cell-${position}`}
                   >
-                    <span className="font-serif text-xl tabular-nums uppercase tracking-[0.04em] sm:text-2xl">
+                    <span className="font-sans text-xl tabular-nums uppercase tracking-[0.04em] sm:text-2xl">
                       {isRevealed && cellNumber ? cellNumber : ""}
                     </span>
                   </button>
@@ -736,7 +736,7 @@ function NumberMemoryGame() {
         {phase === "showing" && (
           <div className="flex flex-col items-center gap-5">
             <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]">memorize</p>
-            <p className="font-serif text-5xl tabular-nums uppercase tracking-[0.04em] text-white sm:text-6xl">
+            <p className="font-sans text-5xl tabular-nums uppercase tracking-[0.04em] text-white sm:text-6xl">
               {visibleNumber}
             </p>
           </div>
@@ -760,7 +760,7 @@ function NumberMemoryGame() {
                 autoComplete="off"
                 autoCorrect="off"
                 spellCheck={false}
-                className="w-full border border-[#2e2e2e] bg-transparent px-4 py-4 text-center font-serif text-4xl tabular-nums uppercase tracking-[0.04em] text-white outline-none placeholder:text-[#5b5b5b] focus:border-[rgba(222,247,103,0.5)]"
+                className="w-full border border-[#2e2e2e] bg-transparent px-4 py-4 text-center font-sans text-4xl tabular-nums uppercase tracking-[0.04em] text-white outline-none placeholder:text-[#5b5b5b] focus:border-[rgba(222,247,103,0.5)]"
                 placeholder=""
                 aria-label="Enter remembered number"
               />
@@ -773,14 +773,14 @@ function NumberMemoryGame() {
 
         {phase === "success" && (
           <div className="flex flex-col items-center gap-5">
-            <p className="font-serif text-4xl uppercase tracking-[0.04em] text-[#DEF767]">correct</p>
+            <p className="font-sans text-4xl uppercase tracking-[0.04em] text-[#DEF767]">correct</p>
             <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]">next number incoming</p>
           </div>
         )}
 
         {phase === "fail" && (
           <div className="flex flex-col items-center gap-5">
-            <p className="font-serif text-4xl uppercase tracking-[0.04em] text-[#ff6a6a]">wrong</p>
+            <p className="font-sans text-4xl uppercase tracking-[0.04em] text-[#ff6a6a]">wrong</p>
             <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]">answer was {target}</p>
             <div className="flex items-center gap-3">
               <button type="button" onClick={handleRetry} className={gameButtonPrimary}>
@@ -924,7 +924,7 @@ export default function GamesPage() {
                     <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">
                         UXATHON / GAMES / PLAY LOUNGE
                     </p>
-                    <h1 className="mt-3 font-serif text-[32px] uppercase leading-[0.95] tracking-[0.02em] text-white sm:text-[40px]">
+                    <h1 className="mt-3 font-sans text-[32px] uppercase leading-[0.95] tracking-[0.02em] text-white sm:text-[40px]">
                         Choose a Game
                     </h1>
                     <p className="mt-4 max-w-[34ch] text-[13px] leading-6 text-[#929292]">
@@ -963,7 +963,7 @@ export default function GamesPage() {
                                     </span>
 
                                     <span className="min-w-0">
-                                        <span className="block font-serif text-[16px] uppercase tracking-[0.04em]">
+                                        <span className="block font-sans text-[16px] uppercase tracking-[0.04em]">
                                             {game.title}
                                         </span>
                                         <span
@@ -990,7 +990,7 @@ export default function GamesPage() {
 
                 <div className="mt-6 border border-[#2e2e2e] bg-[#171717]/70 px-4 py-4 sm:px-5">
                     <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">selected</p>
-                    <p className="mt-2 font-serif text-[18px] uppercase tracking-[0.04em] text-white">
+                    <p className="mt-2 font-sans text-[18px] uppercase tracking-[0.04em] text-white">
                         {selectedGame.title}
                     </p>
                     <p className="mt-2 text-[13px] leading-6 text-[#929292]">{selectedGame.description}</p>
@@ -1294,7 +1294,7 @@ function ReactionTimeGame() {
         className={`flex min-h-[min(48vh,380px)] w-full flex-col items-center justify-center gap-4 border px-6 py-10 text-center transition-colors ${panelTone} cursor-pointer active:border-[rgba(222,247,103,0.5)]`}
       >
         <p className={`font-mono text-[11px] uppercase tracking-[0.14em] ${metaTone}`}>{panelLabel.kicker}</p>
-        <p className={`font-serif text-5xl uppercase leading-[0.95] tracking-[0.02em] sm:text-6xl ${titleTone}`}>
+        <p className={`font-sans text-5xl uppercase leading-[0.95] tracking-[0.02em] sm:text-6xl ${titleTone}`}>
           {panelLabel.title}
         </p>
         <p className={`max-w-[28ch] text-[13px] leading-6 ${hintTone}`}>{panelLabel.hint}</p>
@@ -1660,7 +1660,7 @@ export interface GameState {
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: Arial, Helvetica, sans-sans;
 }
 
 ```
@@ -2126,7 +2126,7 @@ export default function LivePage() {
                         <div className="mt-7 flex items-end justify-between gap-6">
                             <div>
                                 <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">UXISM / LIVE CHAT / EVENT ROOM</p>
-                                <h1 className="mt-3 font-serif text-[36px] uppercase leading-[0.92] tracking-[0.02em] text-white sm:text-[48px]">Signal Room</h1>
+                                <h1 className="mt-3 font-sans text-[36px] uppercase leading-[0.92] tracking-[0.02em] text-white sm:text-[48px]">Signal Room</h1>
                             </div>
 
                             <div className="hidden text-right font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b] sm:block">
@@ -2160,7 +2160,7 @@ export default function LivePage() {
                                             <div className="min-w-0">
                                                 <div className="flex items-start justify-between gap-3">
                                                     <div className="min-w-0">
-                                                        <h2 className="truncate font-serif text-[16px] uppercase tracking-[0.04em] text-white">{name}</h2>
+                                                        <h2 className="truncate font-sans text-[16px] uppercase tracking-[0.04em] text-white">{name}</h2>
                                                         <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">participant</p>
                                                     </div>
 
@@ -2239,7 +2239,7 @@ export default function LivePage() {
 
                         {questionSent ? (
                             <div className="px-4 py-5">
-                                <p className="font-serif text-[18px] uppercase leading-tight tracking-[0.04em] text-white">Question Sent</p>
+                                <p className="font-sans text-[18px] uppercase leading-tight tracking-[0.04em] text-white">Question Sent</p>
                                 <p className="mt-2 text-[13px] leading-5 text-[#929292]">Your question has been sent.</p>
                             </div>
                         ) : (
@@ -2316,7 +2316,7 @@ function LivePollPanel({ poll, currentTime, selectedOptionId, isPending, compact
             <div className={`grid gap-3 px-4 sm:grid-cols-[1fr_auto] sm:items-start sm:px-5 ${compact ? "pb-3 pt-3" : "pb-5 pt-4"}`}>
                 <div className="min-w-0">
                     <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">poll / {hasVoted ? "vote locked" : isPending ? "sending vote" : `${secondsRemaining}s left`}</p>
-                    <h2 className={`mt-2 break-words font-serif uppercase leading-[1.05] tracking-[0.04em] text-white ${compact ? "overflow-hidden text-[16px] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:1] sm:text-[18px]" : "text-[20px] sm:text-[24px]"}`}>{poll.title}</h2>
+                    <h2 className={`mt-2 break-words font-sans uppercase leading-[1.05] tracking-[0.04em] text-white ${compact ? "overflow-hidden text-[16px] [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:1] sm:text-[18px]" : "text-[20px] sm:text-[24px]"}`}>{poll.title}</h2>
                 </div>
 
                 <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b] sm:text-right">{poll.poll_options.length} options</p>
@@ -2441,7 +2441,7 @@ export default function UXISMLoginPage() {
                         <div className="flex items-start justify-between gap-6">
                             <div>
                                 <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">UXISM / LOGIN / 2026</p>
-                                <h1 className="mt-3 max-w-[10ch] font-serif text-[42px] uppercase leading-[0.92] tracking-[0.02em] text-white sm:text-[56px]">Return to System</h1>
+                                <h1 className="mt-3 max-w-[10ch] font-sans text-[42px] uppercase leading-[0.92] tracking-[0.02em] text-white sm:text-[56px]">Return to System</h1>
                             </div>
 
                             <button type="button" className="grid h-10 w-10 shrink-0 place-items-center rounded-[24px] border border-[#5b5b5b] bg-[#181818] text-[#929292] transition-colors active:border-[rgba(222,247,103,0.5)] active:text-[#DEF767] lg:hidden" aria-label="Open login map">
@@ -2465,7 +2465,7 @@ export default function UXISMLoginPage() {
                                 <motion.form key="login-form" onSubmit={submitLogin} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -14 }} transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }} className="space-y-8">
                                     <div>
                                         <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">Access Slab</p>
-                                        <h2 className="mt-2 font-serif text-2xl uppercase tracking-[0.04em] text-white">Login</h2>
+                                        <h2 className="mt-2 font-sans text-2xl uppercase tracking-[0.04em] text-white">Login</h2>
                                         <p className="mt-3 max-w-md text-[13px] leading-6 text-[#929292]">Enter your registered credentials. The interface stays sparse; validation appears only when needed.</p>
                                     </div>
 
@@ -2512,7 +2512,7 @@ export default function UXISMLoginPage() {
                                     <div className="grid h-10 w-10 place-items-center rounded-[24px] border border-[rgba(222,247,103,0.5)] text-[#DEF767]">
                                         <Check size={18} />
                                     </div>
-                                    <h2 className="mt-6 font-serif text-2xl uppercase tracking-[0.04em] text-white">Access Captured</h2>
+                                    <h2 className="mt-6 font-sans text-2xl uppercase tracking-[0.04em] text-white">Access Captured</h2>
                                     <p className="mt-3 max-w-md text-[13px] leading-6 text-[#929292]">Login payload is ready. Replace the console log with your backend authentication request.</p>
                                 </motion.div>
                             )}
@@ -2647,14 +2647,14 @@ export default function MyTeamPage() {
                     </p>
                 ) : !team ? (
                     <div className="border border-[#2e2e2e] bg-[#171717] px-6 py-8 text-center">
-                        <p className="font-serif text-[20px] uppercase tracking-[0.04em] text-white">No Team Found</p>
+                        <p className="font-sans text-[20px] uppercase tracking-[0.04em] text-white">No Team Found</p>
                         <p className="mt-2 text-[13px] text-[#929292]">You are not currently assigned to any team.</p>
                     </div>
                 ) : (
                     <>
                         <div className="border border-[#2e2e2e] bg-[#171717] px-6 py-8">
                             <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#5b5b5b]">TEAM PROFILE</p>
-                            <h1 className="mt-2 font-serif text-[32px] uppercase tracking-[0.04em] text-white">{team.name}</h1>
+                            <h1 className="mt-2 font-sans text-[32px] uppercase tracking-[0.04em] text-white">{team.name}</h1>
 
                         </div>
 
@@ -2680,7 +2680,7 @@ export default function MyTeamPage() {
                                                 </div>
                                             )}
                                             <div>
-                                                <p className="font-serif text-[18px] uppercase tracking-[0.04em] text-white">
+                                                <p className="font-sans text-[18px] uppercase tracking-[0.04em] text-white">
                                                     {member.user?.name || "Unknown User"}
                                                 </p>
                                                 <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">
@@ -2725,7 +2725,7 @@ export default function HomePage() {
                 <div className="flex w-full max-w-md flex-col items-center text-center">
                     <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">UXISM / SPLASH / 2026</p>
 
-                    <h1 className="mt-4 font-serif text-[clamp(2.5rem,12vw,4.5rem)] uppercase leading-[0.92] tracking-[0.02em] text-white">
+                    <h1 className="mt-4 font-sans text-[clamp(2.5rem,12vw,4.5rem)] uppercase leading-[0.92] tracking-[0.02em] text-white">
                         UXATHON&apos;26
                     </h1>
 
@@ -2914,7 +2914,7 @@ export default function ProfilePage() {
                                         className="h-24 w-24 rounded-full border border-[#2e2e2e] object-cover"
                                     />
                                 ) : (
-                                    <div className="grid h-24 w-24 place-items-center rounded-full border border-[#2e2e2e] bg-[#181818] font-serif text-[28px] uppercase tracking-[0.04em] text-[#ff6a6a]">
+                                    <div className="grid h-24 w-24 place-items-center rounded-full border border-[#2e2e2e] bg-[#181818] font-sans text-[28px] uppercase tracking-[0.04em] text-[#ff6a6a]">
                                         {initials}
                                     </div>
                                 )}
@@ -3160,7 +3160,7 @@ export default function RegisterPage() {
             <section className="relative z-10 flex min-h-[calc(100-80px)] flex-col items-center justify-center px-6 py-20">
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }} className="w-full max-w-lg">
                     <div className="mb-10 text-center sm:text-left">
-                        <h1 className="font-serif text-4xl uppercase tracking-tight text-white mb-3">
+                        <h1 className="font-sans text-4xl uppercase tracking-tight text-white mb-3">
                             Join <span className="text-[#ff6a6a]">UXISM</span>
                         </h1>
                         <p className="font-mono text-[12px] uppercase tracking-[0.2em] text-[#5b5b5b]">Establish your identity in the network.</p>

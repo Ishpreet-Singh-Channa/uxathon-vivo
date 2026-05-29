@@ -1,0 +1,104 @@
+@import url('https://fonts.googleapis.com/css2?family=Onest:wght@300;400;500&family=Geist+Mono:wght@400;500&display=swap');
+
+/* ─── UXISM DESIGN TOKENS ─────────────────────────────────── */
+:root {
+  --base-bg:   #181818;
+  --deep-bg:   #171717;
+  --border:    #2e2e2e;
+  --muted:     #5b5b5b;
+  --secondary: #929292;
+  --primary:   #ffffff;
+  --lime:      #DEF767;
+  --coral:     #ff6a6a;
+
+  --font-body: 'Onest', 'Cygre', sans-serif;
+  --font-mono: 'Geist Mono', monospace;
+  /* GROZEN MEDICAL fallback to a condensed serif */
+  --font-display: 'Times New Roman', serif;
+}
+
+/* ─── RESET ───────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--base-bg);
+  color: var(--primary);
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+/* ─── DOT GRID UNDERLAY ───────────────────────────────────── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    radial-gradient(circle, rgba(255,255,255,0.12) 1px, transparent 1px);
+  background-size: 28px 28px;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.25;
+}
+
+/* ─── CORNER CROSSHAIRS ───────────────────────────────────── */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background:
+    /* top-left */
+    linear-gradient(var(--border), var(--border)) 16px 16px / 16px 1px no-repeat,
+    linear-gradient(var(--border), var(--border)) 16px 16px / 1px 16px no-repeat,
+    /* top-right */
+    linear-gradient(var(--border), var(--border)) calc(100% - 16px) 16px / 16px 1px no-repeat,
+    linear-gradient(var(--border), var(--border)) calc(100% - 16px) 16px / 1px 16px no-repeat,
+    /* bottom-left */
+    linear-gradient(var(--border), var(--border)) 16px calc(100% - 16px) / 16px 1px no-repeat,
+    linear-gradient(var(--border), var(--border)) 16px calc(100% - 16px) / 1px 16px no-repeat,
+    /* bottom-right */
+    linear-gradient(var(--border), var(--border)) calc(100% - 16px) calc(100% - 16px) / 16px 1px no-repeat,
+    linear-gradient(var(--border), var(--border)) calc(100% - 16px) calc(100% - 16px) / 1px 16px no-repeat;
+}
+
+/* ─── SCROLLBAR ───────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--deep-bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ─── TYPOGRAPHY ──────────────────────────────────────────── */
+.display { font-family: var(--font-display); letter-spacing: 0.02em; }
+.mono    { font-family: var(--font-mono); }
+.nav-label {
+  font-size: 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-family: var(--font-display);
+}
+.body-copy  { font-size: 13px; color: var(--secondary); line-height: 1.5; }
+.meta       { font-family: var(--font-mono); font-size: 11px; color: var(--muted); }
+
+/* ─── UTILITY ─────────────────────────────────────────────── */
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px; overflow: hidden;
+  clip: rect(0,0,0,0); white-space: nowrap; border-width: 0;
+}
+
+/* ─── GAME-SPECIFIC GLOBALS ───────────────────────────────── */
+.slot-glow {
+  box-shadow: 0 0 0 1px var(--lime), 0 0 12px rgba(222,247,103,0.15);
+}
+.claimed-flash {
+  animation: claimedFlash 0.5s ease forwards;
+}
+@keyframes claimedFlash {
+  0%   { opacity: 1; }
+  50%  { opacity: 0.3; }
+  100% { opacity: 1; }
+}

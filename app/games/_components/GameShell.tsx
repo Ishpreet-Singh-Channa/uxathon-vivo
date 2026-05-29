@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ArrowLeft, Gavel, Gamepad2, MessageCircle, User, Users } from "lucide-react";
-
+import React, { useState, useEffect } from "react";
 const bottomNavItems = [
   { label: "My Team", href: "/myteam", icon: Users, enabled: true },
   { label: "Bidding", href: null, icon: Gavel, enabled: false },
@@ -21,23 +21,25 @@ type GameShellProps = {
 export function GameShell({ meta, title, description, children }: GameShellProps) {
   const pathname = usePathname();
 
+  const [activeRoomCode, setActiveRoomCode] = useState<string | null>(null);
+
+  useEffect(() => {
+    const roomMatch = pathname?.match(/^\/room\/([A-Z0-9]+)/i);
+    if (roomMatch) {
+      const code = roomMatch[1].toUpperCase();
+      setActiveRoomCode(code);
+      localStorage.setItem('active-room-code', code);
+    } else {
+      const saved = localStorage.getItem('active-room-code');
+      if (saved) {
+        setActiveRoomCode(saved);
+      }
+    }
+  }, [pathname]);
+
   return (
     <main className="relative flex min-h-screen flex-col overflow-hidden bg-[#181818] text-white selection:bg-[#ff6a6a] selection:text-[#171717]">
       <PageDecor />
-
-      <header className="relative z-20 flex shrink-0 items-center justify-between border-b border-[#2e2e2e] bg-[#181818]/95 px-5 py-4 backdrop-blur-[2px]">
-        <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292] sm:text-[12px]">
-          UXISM<span className="text-[#5b5b5b]">/</span>UXATHON
-        </p>
-
-        <Link
-          href="/profile"
-          aria-label="Open profile"
-          className="grid h-10 w-10 place-items-center rounded-[24px] border border-[#5b5b5b] bg-[#181818] text-[#929292] active:border-[rgba(222,247,103,0.5)] active:text-[#DEF767]"
-        >
-          <User size={18} aria-hidden />
-        </Link>
-      </header>
 
       <section className="relative z-10 mx-auto flex w-full max-w-lg flex-1 flex-col px-5 pb-28 pt-6">
         <Link
@@ -47,62 +49,15 @@ export function GameShell({ meta, title, description, children }: GameShellProps
           <ArrowLeft size={14} aria-hidden />
           Games lounge
         </Link>
-
         <div className="mb-6">
           <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">{meta}</p>
-          <h1 className="mt-3 font-serif text-[32px] uppercase leading-[0.95] tracking-[0.02em] text-white sm:text-[40px]">
+          <h1 className="mt-3 font-sans text-[32px] uppercase leading-[0.95] tracking-[0.02em] text-white sm:text-[40px]">
             {title}
           </h1>
           <p className="mt-4 max-w-[34ch] text-[13px] leading-6 text-[#929292]">{description}</p>
         </div>
-
         {children}
       </section>
-
-      <nav
-        aria-label="Dashboard navigation"
-        className="fixed bottom-0 left-0 right-0 z-20 border-t border-[#2e2e2e] bg-[#181818]/95 backdrop-blur-[2px] pb-[max(0.75rem,env(safe-area-inset-bottom))]"
-      >
-        <ul className="grid grid-cols-4">
-          {bottomNavItems.map((item) => {
-            const Icon = item.icon;
-            const isActive = item.href && pathname === item.href;
-
-            if (!item.enabled) {
-              return (
-                <li key={item.label}>
-                  <span
-                    className="flex flex-col items-center gap-1.5 px-1 py-3 text-[#5b5b5b]"
-                    aria-disabled="true"
-                  >
-                    <Icon size={18} aria-hidden />
-                    <span className="font-mono text-[9px] uppercase tracking-[0.1em] sm:text-[10px]">
-                      {item.label}
-                    </span>
-                  </span>
-                </li>
-              );
-            }
-
-            return (
-              <li key={item.label}>
-                <Link
-                  href={item.href!}
-                  className={`flex flex-col items-center gap-1.5 px-1 py-3 transition-colors ${
-                    isActive ? "text-[#ff6a6a]" : "text-[#929292] active:text-[#DEF767]"
-                  }`}
-                  aria-current={isActive ? "page" : undefined}
-                >
-                  <Icon size={18} aria-hidden />
-                  <span className="font-mono text-[9px] uppercase tracking-[0.1em] sm:text-[10px]">
-                    {item.label}
-                  </span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
     </main>
   );
 }
@@ -122,11 +77,11 @@ export function GameStats({
     <div className="mb-4 grid grid-cols-2 gap-px border border-[#2e2e2e] bg-[#2e2e2e]">
       <div className="bg-[#171717]/70 px-4 py-3">
         <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">{levelLabel}</p>
-        <p className="mt-1 font-serif text-2xl tabular-nums uppercase tracking-[0.04em] text-white">{levelValue}</p>
+        <p className="mt-1 font-sans text-2xl tabular-nums uppercase tracking-[0.04em] text-white">{levelValue}</p>
       </div>
       <div className="bg-[#171717]/70 px-4 py-3">
         <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">{bestLabel}</p>
-        <p className="mt-1 font-serif text-2xl tabular-nums uppercase tracking-[0.04em] text-white">{bestValue}</p>
+        <p className="mt-1 font-sans text-2xl tabular-nums uppercase tracking-[0.04em] text-white">{bestValue}</p>
       </div>
     </div>
   );
