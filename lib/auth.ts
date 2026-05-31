@@ -23,7 +23,7 @@ async function upsertUser(email: string, name?: string | null, avatarUrl?: strin
           id: $id, 
           email: $email, 
           name: $name, 
-          profile_picture: $profile_picture, 
+          profile_picture: $avatarUrl, 
           created_at: $createdAt, 
           updated_at: $updatedAt 
         }

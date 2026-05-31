@@ -1,4 +1,6 @@
-const ENDPOINT = process.env.HASURA_GRAPHQL_ENDPOINT || 'http://localhost:8100/v1/graphql'
+const ENDPOINT = 'https://hasura.ubuntudevt65535.dpdns.org/v1/graphql'
+// process.env.HASURA_GRAPHQL_ENDPOINT 
+// || 'http://localhost:8100/v1/graphql'
 const ADMIN_SECRET = process.env.HASURA_ADMIN_SECRET || 'secret'
 
 export async function hasuraAdminRequest<T>(

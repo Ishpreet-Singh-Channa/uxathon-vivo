@@ -5,7 +5,7 @@ import { chimpConfig } from "./chimp/config";
 import { numberMemoryConfig } from "./number-memory/config";
 import { reactionTimeConfig } from "./reaction-time/config";
 import { sequenceMemoryConfig } from "./sequence-memory/config";
-// import { personaFlowConfig } from "./persona-flow/config";
+import { personaFlowConfig } from "./persona-flow/config";
 
 
 const gameRegistry = new Map<string, GameDefinition>();
@@ -15,6 +15,7 @@ const coreGames = [
   numberMemoryConfig,
   reactionTimeConfig,
   sequenceMemoryConfig,
+  personaFlowConfig
 ];
 
 coreGames.forEach((config) => {

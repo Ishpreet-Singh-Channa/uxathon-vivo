@@ -3,11 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { toPng } from "html-to-image";
-import { ArrowLeft, Download, Pencil, Save, X } from "lucide-react";
+import { ArrowLeft, Download, Pencil, Save, X , LogOut} from "lucide-react";
 import Field from "@/components/Field";
 import { useAuth } from "@/context/token-context";
 import { gql } from "@apollo/client";
 import { useMutation } from "@apollo/client/react";
+import { useRouter } from "next/navigation";
+
 
 const PROFILE_STORAGE_KEY = "uxathon-player-profile";
 const UPDATE_PROFILE_MUTATION = gql`
@@ -113,6 +115,8 @@ export default function ProfilePage() {
     const [isDownloading, setIsDownloading] = useState(false);
     const [hydrated, setHydrated] = useState(false);
 
+    const router = useRouter();
+    
     useEffect(() => {
         const saved = loadProfile();
         const decoded = decodeToProfile(auth.getData());
@@ -164,6 +168,19 @@ export default function ProfilePage() {
     // Otherwise, append the backend URL and the /uploads/ prefix
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000";
     return `${backendUrl}/uploads/${imagePath}`;
+}
+
+    function handleLogout() {
+    localStorage.removeItem(PROFILE_STORAGE_KEY);
+
+    // clear everything else stored by the app
+    localStorage.clear();
+    sessionStorage.clear();
+
+    // if your auth context exposes logout()
+    auth.logout?.();
+
+    router.replace("/login");
 }
 
     async function saveProfile() {
@@ -312,15 +329,29 @@ export default function ProfilePage() {
                                 </>
                             ) : (
                                 <button type="button" onClick={startEditing} className="flex h-11 flex-1 items-center justify-center gap-2 border border-[#2e2e2e] font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292] active:border-[rgba(222,247,103,0.5)] active:text-[#DEF767]">
-                                    <Pencil size={14} aria-hidden />
+                                    <Pencil size={12} aria-hidden />
                                     Edit
                                 </button>
                             )}
 
                             <button type="button" onClick={downloadCard} disabled={isDownloading || isEditing} className="flex h-11 flex-1 items-center justify-center gap-2 border border-[rgba(222,247,103,0.5)] font-mono text-[11px] uppercase tracking-[0.14em] text-[#DEF767] disabled:cursor-not-allowed disabled:opacity-40">
-                                <Download size={14} aria-hidden />
-                                {isDownloading ? "Exporting…" : "Download PNG"}
+                                <Download size={12} aria-hidden />
+                                {isDownloading ? "Exporting…" : "Download"}
                             </button>
+
+
+                            <button
+                                type="button"
+                                onClick={handleLogout}
+                                className="flex h-11 w-full items-center justify-center gap-2 border border-[#ff6a6a] font-mono text-[11px] uppercase tracking-[0.14em] text-[#ff6a6a] transition-colors hover:bg-[#ff6a6a] hover:text-[#171717]"
+                            
+                            >
+                                <LogOut size={12} aria-hidden />
+                                Logout
+                            </button>
+
+
+                            
                         </div>
                     </>
                 )}

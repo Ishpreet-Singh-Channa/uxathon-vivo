@@ -1,4 +1,7 @@
-# Host: create initialize the card game session for a room
+// Host: create initialize the card game session for a room
+
+import { gql } from '@apollo/client'
+
 export const CREATE_CARD_GAME_SESSION = gql`
 mutation CreateCardGameSession($roomId: uuid!, $domainId: uuid!, $startedBy: uuid!, $personaIds: [room_card_game_personas_insert_input!]!) {
   insert_room_card_game_sessions_one(
@@ -17,7 +20,7 @@ mutation CreateCardGameSession($roomId: uuid!, $domainId: uuid!, $startedBy: uui
   }
 }
 `
-# Player: place a card into a slot
+// Player: place a card into a slot
 export const UPSERT_PLAYER_SLOT = gql`mutation UpsertPlayerSlot($sessionId: uuid!, $userId: uuid!, $personaId: uuid!, $slotType: card_flow_type!, $flowCardId: uuid!) {
   insert_room_card_game_player_slots_one(
     object: {
@@ -35,7 +38,7 @@ export const UPSERT_PLAYER_SLOT = gql`mutation UpsertPlayerSlot($sessionId: uuid
   ) { id }
 }
 `
-# Player: claim a persona (atomic — only succeeds if not already claimed)
+// Player: claim a persona (atomic — only succeeds if not already claimed)
 export const CLAIM_PERSONA = gql`mutation ClaimPersona($sessionPersonaId: uuid!, $userId: uuid!) {
   update_room_card_game_personas(
     where: {

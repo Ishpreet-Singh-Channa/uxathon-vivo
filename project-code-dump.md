@@ -12,7 +12,8 @@ import { getMainDefinition } from "@apollo/client/utilities";
 
 // Normal Query, mutation link
 const httpLink = new HttpLink({
-    uri: "http://localhost:8100/v1/graphql",
+    // uri: "http://localhost:8100/v1/graphql",
+    uri: "https://hasura.ubuntudevt65535.dpdns.org/v1/graphql", 
     fetch: async (uri, options) => {
         const token = localStorage.getItem("jwt-token");
         console.log("Token in fetch:", token);
@@ -24,7 +25,7 @@ const httpLink = new HttpLink({
 // WebSocket link for subscriptions
 const wsLink = new GraphQLWsLink(
     createClient({
-        url: "ws://localhost:8100/v1/graphql",
+        url: "wss://hasura.ubuntudevt65535.dpdns.org/v1/graphql",
         connectionParams: async () => {
             const token = localStorage.getItem("jwt-token");
             if (!token) window.location.href = "/login";
@@ -914,6 +915,13 @@ export default function DashboardPage() {
             });
             
             const data = await res.json();
+            console.log("data",data)
+            console.log(
+            token,
+            //host_user_id,
+            //game_id,
+            //code
+            )
             if (res.ok && data.room) {
                 localStorage.setItem('active-room-code', data.room.code);
                 router.push(`/room/${data.room.code}`);
@@ -941,8 +949,10 @@ export default function DashboardPage() {
                 headers,
                 body: JSON.stringify({ code: joinCode.trim().toUpperCase() }),
             });
+            console.log("res", res)
             
             const data = await res.json();
+            console.log("data", data)
             if (res.ok && data.code) {
                 localStorage.setItem('active-room-code', data.code);
                 router.push(`/room/${data.code}`);
@@ -2091,7 +2101,8 @@ export default function NumberMemoryPage() {
 
 import Link from "next/link";
 import { useState, useEffect } from "react";
-import { ArrowLeft, Brain, Gamepad2, MessageCircle, Plus, Shapes, Sparkles, User, Users, Zap, type LucideIcon, X, Radio } from "lucide-react";
+// import { ArrowLeft, Brain, Gamepad2, MessageCircle, Plus, Shapes, Sparkles, User, Users, Zap, type LucideIcon, X, Radio } from "lucide-react";
+import { ArrowLeft, Brain, Gamepad2, MessageCircle, Plus, Shapes, Sparkles, User, Users, Zap, Layers, type LucideIcon, X, Radio } from "lucide-react";
 import { useMultiplayer } from "@/lib/multiplayer/useMultiplayer";
 
 type Game = {
@@ -2108,6 +2119,14 @@ const GAMES: Game[] = [
     { id: "number-memory", title: "number-memory", description: "Draw the prompt before the room times out.", meta: "mode / creative", href: "/games/number-memory", icon: Shapes },
     { id: "sequence-memory", title: "sequence-memory", description: "Vote with the crowd on the fastest path.", meta: "mode / social", href: "/games/sequence-memory", icon: Zap },
     { id: "reaction-time", title: "reaction-time", description: "Answer streak questions from the event deck.", meta: "mode / quiz", href: "/games/reaction-time", icon: Sparkles },
+    { 
+        id: "persona-flow", 
+        title: "Persona Flow", 
+        description: "Draft identity matrices in a real-time race against synced nodes.", 
+        meta: "mode / strategy", 
+        href: "/games/persona-flow", 
+        icon: Layers // Import Layers from lucide-react
+    },
 ];
 
 export default function GamesPage() {
@@ -2195,6 +2214,150 @@ export default function GamesPage() {
 ### File: `app/games/persona-flow/config.tsx`
 
 ```tsx
+import { lazy } from "react";
+import { registerGame } from "../registry";
+
+export const personaFlowConfig = {
+  id: "persona-flow",
+  name: "Persona Flow",
+  description: "Race to build the correct persona flow matrix before rival nodes.",
+  category: "design" as const,
+  scoring: { strategy: "highest" as const, unit: "claims" },
+  realtime: true,
+  leaderboard: true,
+  rounds: 1,
+  component: lazy(() => import("./page")),
+};
+
+export function initPersonaFlow() {
+  registerGame(personaFlowConfig);
+}
+
+```
+
+---
+
+### File: `app/games/persona-flow/page.tsx`
+
+```tsx
+"use client";
+
+import React, { useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import { useMultiplayer } from "@/lib/multiplayer/useMultiplayer";
+import { GameShell } from "../_components/GameShell";
+
+// Import your X app dependencies
+import { GameProvider, useGame } from "@/store/gameStore";
+import UserSelect from "@/components/onboarding/UserSelect/UserSelect";
+import DomainSelect from "@/components/onboarding/DomainSelect/DomainSelect";
+import PersonaSelect from "@/components/onboarding/PersonaSelect/PersonaSelect";
+import GameBoard from "@/components/game/GameBoard/GameBoard";
+import Leaderboard from "@/components/views/Leaderboard/Leaderboard";
+import FABRail from "@/components/core/FABRail/FABRail";
+
+function PersonaFlowBridge() {
+  const searchParams = useSearchParams();
+  const mode = searchParams.get("mode");
+  
+  const { userId, room, gameState, updateGameState, activeRoomCode } = useMultiplayer();
+  const isMultiplayer = mode !== "singleplayer" && !!activeRoomCode;
+
+  const { state, dispatch } = useGame();
+
+  // 1. Sync User Data Automatically in Multiplayer
+  useEffect(() => {
+    if (isMultiplayer && room && state.gamePhase === 'USER_SELECT') {
+      const me = room.room_players.find(p => p.user.id === userId);
+      if (me) {
+        dispatch({
+          type: 'SET_USER',
+          payload: {
+            id: me.user.id,
+            username: me.user.name || 'Network Node',
+            teamName: 'UXISM Squad'
+          }
+        });
+        dispatch({ type: 'GO_TO_PHASE', payload: 'DOMAIN_SELECT' });
+      }
+    }
+  }, [isMultiplayer, room, state.gamePhase, userId, dispatch]);
+
+  // 2. Broadcast Local Wins to the Multiplayer Matrix
+  useEffect(() => {
+    if (isMultiplayer && state.gamePhase === 'WON' && state.personaClaimed) {
+      const syncClaim = async () => {
+        const currentClaims = gameState?.claims || {};
+        const currentLogs = gameState?.logs || [];
+        
+        // Prevent duplicate broadcast
+        if (currentClaims[state.selectedPersona!.id] === userId) return;
+
+        await updateGameState({
+          ...gameState,
+          claims: {
+            ...currentClaims,
+            [state.selectedPersona!.id]: userId
+          },
+          logs: [
+            `Node ${state.currentUser?.username} secured persona: ${state.selectedPersona!.name}`,
+            ...currentLogs
+          ].slice(0, 20)
+        });
+      };
+      syncClaim();
+    }
+  }, [state.gamePhase, state.personaClaimed]);
+
+  // 3. Listen for Rival Claims and Update Local State
+  useEffect(() => {
+    if (isMultiplayer && gameState?.claims && state.selectedPersona) {
+      const claimedBy = gameState.claims[state.selectedPersona.id];
+      
+      // If claimed by someone else, trigger the taken screen
+      if (claimedBy && claimedBy !== userId) {
+        const rivalPlayer = room?.room_players.find(p => p.user.id === claimedBy);
+        dispatch({ 
+          type: 'PERSONA_TAKEN_BY', 
+          payload: rivalPlayer?.user.name || 'Rival Node' 
+        });
+      }
+    }
+  }, [gameState?.claims, state.selectedPersona, userId, room, dispatch]);
+
+  return (
+    <div className="relative flex flex-col w-full h-full min-h-[600px] bg-[#181818] overflow-hidden rounded-xl border border-[#2e2e2e]">
+      {state.gamePhase === 'USER_SELECT' && <UserSelect />}
+      {state.gamePhase === 'DOMAIN_SELECT' && <DomainSelect />}
+      {state.gamePhase === 'PERSONA_SELECT' && <PersonaSelect />}
+      {state.gamePhase === 'LEADERBOARD' && <Leaderboard />}
+      {(state.gamePhase === 'PLAYING' ||
+        state.gamePhase === 'WON' ||
+        state.gamePhase === 'PERSONA_TAKEN') && <GameBoard />}
+      <FABRail />
+    </div>
+  );
+}
+
+export default function PersonaFlowPage() {
+  const searchParams = useSearchParams();
+  const mode = searchParams.get("mode");
+  const isMultiplayer = mode !== "singleplayer";
+
+  return (
+    <GameShell
+      meta={`UXATHON / ENVIRONMENT / PERSONA FLOW / [${isMultiplayer ? "MULTIPLAYER" : "SINGLEPLAYER"}]`}
+      title="Context Persona Flow"
+      description="Navigate the matrix. Align archetypes to operational realities before your rivals."
+    >
+      <GameProvider>
+        <Suspense fallback={<div className="p-8 text-center text-[#5b5b5b] font-mono uppercase text-[11px]">Initializing Pipeline...</div>}>
+          <PersonaFlowBridge />
+        </Suspense>
+      </GameProvider>
+    </GameShell>
+  );
+}
 
 ```
 
@@ -2469,7 +2632,7 @@ import { chimpConfig } from "./chimp/config";
 import { numberMemoryConfig } from "./number-memory/config";
 import { reactionTimeConfig } from "./reaction-time/config";
 import { sequenceMemoryConfig } from "./sequence-memory/config";
-// import { personaFlowConfig } from "./persona-flow/config";
+import { personaFlowConfig } from "./persona-flow/config";
 
 
 const gameRegistry = new Map<string, GameDefinition>();
@@ -2479,6 +2642,7 @@ const coreGames = [
   numberMemoryConfig,
   reactionTimeConfig,
   sequenceMemoryConfig,
+  personaFlowConfig
 ];
 
 coreGames.forEach((config) => {
@@ -2804,7 +2968,7 @@ body {
 ### File: `app/layout.tsx`
 
 ```tsx
-import type { Metadata } from "next";
+    import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/context/token-context";
@@ -2831,7 +2995,11 @@ export default function RootLayout({
     children: React.ReactNode;
 }>) {
     return (
-        <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
+        <html
+            lang="en"
+            suppressHydrationWarning
+            className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+            >
             <ApolloWrapper>
                 <AuthProvider>
                     <body className="min-h-full flex flex-col">{children}</body>
@@ -4062,11 +4230,13 @@ export default function HomePage() {
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { toPng } from "html-to-image";
-import { ArrowLeft, Download, Pencil, Save, X } from "lucide-react";
+import { ArrowLeft, Download, Pencil, Save, X , LogOut} from "lucide-react";
 import Field from "@/components/Field";
 import { useAuth } from "@/context/token-context";
 import { gql } from "@apollo/client";
 import { useMutation } from "@apollo/client/react";
+import { useRouter } from "next/navigation";
+
 
 const PROFILE_STORAGE_KEY = "uxathon-player-profile";
 const UPDATE_PROFILE_MUTATION = gql`
@@ -4172,6 +4342,8 @@ export default function ProfilePage() {
     const [isDownloading, setIsDownloading] = useState(false);
     const [hydrated, setHydrated] = useState(false);
 
+    const router = useRouter();
+    
     useEffect(() => {
         const saved = loadProfile();
         const decoded = decodeToProfile(auth.getData());
@@ -4223,6 +4395,19 @@ export default function ProfilePage() {
     // Otherwise, append the backend URL and the /uploads/ prefix
     const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000";
     return `${backendUrl}/uploads/${imagePath}`;
+}
+
+    function handleLogout() {
+    localStorage.removeItem(PROFILE_STORAGE_KEY);
+
+    // clear everything else stored by the app
+    localStorage.clear();
+    sessionStorage.clear();
+
+    // if your auth context exposes logout()
+    auth.logout?.();
+
+    router.replace("/login");
 }
 
     async function saveProfile() {
@@ -4371,15 +4556,29 @@ export default function ProfilePage() {
                                 </>
                             ) : (
                                 <button type="button" onClick={startEditing} className="flex h-11 flex-1 items-center justify-center gap-2 border border-[#2e2e2e] font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292] active:border-[rgba(222,247,103,0.5)] active:text-[#DEF767]">
-                                    <Pencil size={14} aria-hidden />
+                                    <Pencil size={12} aria-hidden />
                                     Edit
                                 </button>
                             )}
 
                             <button type="button" onClick={downloadCard} disabled={isDownloading || isEditing} className="flex h-11 flex-1 items-center justify-center gap-2 border border-[rgba(222,247,103,0.5)] font-mono text-[11px] uppercase tracking-[0.14em] text-[#DEF767] disabled:cursor-not-allowed disabled:opacity-40">
-                                <Download size={14} aria-hidden />
-                                {isDownloading ? "Exporting…" : "Download PNG"}
+                                <Download size={12} aria-hidden />
+                                {isDownloading ? "Exporting…" : "Download"}
                             </button>
+
+
+                            <button
+                                type="button"
+                                onClick={handleLogout}
+                                className="flex h-11 w-full items-center justify-center gap-2 border border-[#ff6a6a] font-mono text-[11px] uppercase tracking-[0.14em] text-[#ff6a6a] transition-colors hover:bg-[#ff6a6a] hover:text-[#171717]"
+                            
+                            >
+                                <LogOut size={12} aria-hidden />
+                                Logout
+                            </button>
+
+
+                            
                         </div>
                     </>
                 )}
@@ -4745,7 +4944,7 @@ export default function RegisterPage() {
                         <p className="font-mono text-[12px] uppercase tracking-[0.2em] text-[#5b5b5b]">Establish your identity in the network.</p>
                     </div>
 
-                    <form onSubmit={handleSubmit} className="group relative">
+                    <form onSubmit={handleSubmit} className="group relative" suppressHydrationWarning>
                         {/* Unified Slab Construction */}
                         <div className="border border-[#2e2e2e] bg-[#171717] divide-y divide-[#2e2e2e]">
 
@@ -8615,9 +8814,6 @@ export default function GameBoard() {
   const { data } = useSubscription<{ teams: any[] }>(WATCH_TEAMS, {
     skip: !state.selectedPersona || state.gamePhase === 'WON' || state.gamePhase === 'PERSONA_TAKEN',
   });
-
-  console.log("using")
-
   useEffect(() => {
     if (!data || !state.selectedPersona || !state.currentUser) return;
     const rivalTeam = data.teams.find(
@@ -14328,7 +14524,7 @@ export default function NextAuthProvider({
 ```typescript
 /// <reference types="next" />
 /// <reference types="next/image-types/global" />
-import "./.next/dev/types/routes.d.ts";
+import "./.next/types/routes.d.ts";
 
 // NOTE: This file should not be edited
 // see https://nextjs.org/docs/app/api-reference/config/typescript for more information.

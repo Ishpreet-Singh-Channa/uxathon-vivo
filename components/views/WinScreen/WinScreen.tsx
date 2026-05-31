@@ -9,6 +9,35 @@ import { CREATE_TEAM, ADD_TEAM_MEMBER } from '@/lib/GameRules/game-queries';
 import styles from './WinScreen.module.css';
 
 
+
+
+type CreateTeamData = {
+  insert_teams_one: {
+    id: string;
+    color: string;
+    created_by: string;
+  } | null;
+};
+
+type CreateTeamVariables = {
+  name: string;
+  color: string;
+  userId: string;
+};
+
+type AddTeamMemberData = {
+  insert_team_members_one: {
+    id: string;
+  } | null;
+};
+
+type AddTeamMemberVariables = {
+  teamId: string;
+  userId: string;
+  memberType: string;
+};
+
+
 type WinScreenProps = {
   userId?: string;
 };
@@ -18,8 +47,13 @@ export default function WinScreen({ userId }: WinScreenProps) {
   const { selectedPersona, currentUser } = state;
   const [claimStatus, setClaimStatus] = useState<'VERIFYING' | 'WON' | 'LOST'>('VERIFYING');
 
-  const [createTeam] = useMutation(CREATE_TEAM);
-  const [addTeamMember] = useMutation(ADD_TEAM_MEMBER);
+  const [createTeam] = useMutation<CreateTeamData, CreateTeamVariables>(CREATE_TEAM);
+  const [addTeamMember] = useMutation<AddTeamMemberData, AddTeamMemberVariables>(ADD_TEAM_MEMBER);
+  // ---------------------------------------------------
+
+  
+  // const [createTeam] = useMutation(CREATE_TEAM);
+  // const [addTeamMember] = useMutation(ADD_TEAM_MEMBER);
   // const [claimPersona, ] = useMutation(CREATE_TEAM_ATOMIC);
   // const [createTeam] = useMutation(CREATE_TEAM_ATOMIC_V2);
   const claimAttempted = useRef(false);

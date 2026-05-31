@@ -221,7 +221,8 @@
 
 import Link from "next/link";
 import { useState, useEffect } from "react";
-import { ArrowLeft, Brain, Gamepad2, MessageCircle, Plus, Shapes, Sparkles, User, Users, Zap, type LucideIcon, X, Radio } from "lucide-react";
+// import { ArrowLeft, Brain, Gamepad2, MessageCircle, Plus, Shapes, Sparkles, User, Users, Zap, type LucideIcon, X, Radio } from "lucide-react";
+import { ArrowLeft, Brain, Gamepad2, MessageCircle, Plus, Shapes, Sparkles, User, Users, Zap, Layers, type LucideIcon, X, Radio } from "lucide-react";
 import { useMultiplayer } from "@/lib/multiplayer/useMultiplayer";
 
 type Game = {
@@ -238,6 +239,14 @@ const GAMES: Game[] = [
     { id: "number-memory", title: "number-memory", description: "Draw the prompt before the room times out.", meta: "mode / creative", href: "/games/number-memory", icon: Shapes },
     { id: "sequence-memory", title: "sequence-memory", description: "Vote with the crowd on the fastest path.", meta: "mode / social", href: "/games/sequence-memory", icon: Zap },
     { id: "reaction-time", title: "reaction-time", description: "Answer streak questions from the event deck.", meta: "mode / quiz", href: "/games/reaction-time", icon: Sparkles },
+    { 
+        id: "persona-flow", 
+        title: "Persona Flow", 
+        description: "Draft identity matrices in a real-time race against synced nodes.", 
+        meta: "mode / strategy", 
+        href: "/games/persona-flow", 
+        icon: Layers // Import Layers from lucide-react
+    },
 ];
 
 export default function GamesPage() {

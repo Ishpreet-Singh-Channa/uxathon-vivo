@@ -19,9 +19,6 @@ export default function GameBoard() {
   const { data } = useSubscription<{ teams: any[] }>(WATCH_TEAMS, {
     skip: !state.selectedPersona || state.gamePhase === 'WON' || state.gamePhase === 'PERSONA_TAKEN',
   });
-
-  console.log("using")
-
   useEffect(() => {
     if (!data || !state.selectedPersona || !state.currentUser) return;
     const rivalTeam = data.teams.find(

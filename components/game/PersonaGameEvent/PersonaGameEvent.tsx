@@ -23,8 +23,8 @@ function GameOrchestrator({ onBack }: { onBack: () => void }) {
     const [isInitializing, setIsInitializing] = useState(true);
 
     const userPayload = getData();
-    const userId = userPayload?.sub;
-
+    // const userId = userPayload?.sub;
+    const userId = userPayload?.sub || (userPayload as any)?.["https://hasura.io/jwt/claims"]?.["x-hasura-user-id"];
     const { data: claimData, loading: claimLoading } = useQuery<{ personas: any[] }>(GET_USER_CLAIM, {
         variables: { userId },
         skip: !userId,
@@ -37,15 +37,16 @@ function GameOrchestrator({ onBack }: { onBack: () => void }) {
         }
 
         if (state.gamePhase === "USER_SELECT") {
-            if (userPayload) {
+            if (userPayload && userId) {
             console.log("userPayload in personaGameEvent", userPayload)
             console.log("userPayload.id in personaGameEvent", userPayload.id)
                 dispatch({
                     type: "SET_USER",
                     payload: {
-                        id: userPayload.id || "fuckkk",
-                        username: (userPayload.name as string) || "Authorized Player",
-                        teamName: "UXISM Team"
+                        // id: userPayload.id || "fuckkk",
+                        id: String(userId),
+                        username: (userPayload.name as string) || "Authorized Fuuckk Player",
+                        teamName: "Sololofuckk"
                     }
                 });
                 dispatch({ type: "GO_TO_PHASE", payload: "DOMAIN_SELECT" });

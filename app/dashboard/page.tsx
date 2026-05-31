@@ -362,6 +362,13 @@ export default function DashboardPage() {
             });
             
             const data = await res.json();
+            console.log("data",data)
+            console.log(
+            token,
+            //host_user_id,
+            //game_id,
+            //code
+            )
             if (res.ok && data.room) {
                 localStorage.setItem('active-room-code', data.room.code);
                 router.push(`/room/${data.room.code}`);
@@ -389,8 +396,10 @@ export default function DashboardPage() {
                 headers,
                 body: JSON.stringify({ code: joinCode.trim().toUpperCase() }),
             });
+            console.log("res", res)
             
             const data = await res.json();
+            console.log("data", data)
             if (res.ok && data.code) {
                 localStorage.setItem('active-room-code', data.code);
                 router.push(`/room/${data.code}`);
