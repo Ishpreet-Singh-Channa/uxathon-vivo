@@ -1,4 +1,4 @@
-    import type { Metadata } from "next";
+import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/context/token-context";
@@ -30,11 +30,13 @@ export default function RootLayout({
             suppressHydrationWarning
             className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
             >
+            <body className="min-h-full flex flex-col suppressHydrationWarning">
             <ApolloWrapper>
                 <AuthProvider>
-                    <body className="min-h-full flex flex-col">{children}</body>
+                    {children}
                 </AuthProvider>
             </ApolloWrapper>
+            </body>
         </html>
     );
 }

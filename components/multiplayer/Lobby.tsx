@@ -114,7 +114,8 @@ export function Lobby({ room, userId, isHost, isWS, onStart, onLeave }: LobbyPro
             SYNCED PLAYER NODES
           </p>
           <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b]">
-            {room.room_players.length} / {room.max_players || 8} CONNECTED
+            // {room.room_players.length} / {room.max_players || 8} CONNECTED
+            {room.room_players.length} / {room.max_players ?? '∞'} CONNECTED
           </span>
         </div>
 

@@ -56,6 +56,472 @@ export function ApolloWrapper({ children }: { children: React.ReactNode }) {
 
 ---
 
+### File: `apis/multiplayer/create/route.ts`
+
+```typescript
+import { getUserIdFromRequest } from '@/lib/multiplayer/jwt'
+import { hasuraAdminRequest } from '@/lib/hasura'
+import { generateRoomCode } from '@/lib/room-code'
+
+export async function POST(req: Request) {
+  const userId = getUserIdFromRequest(req)
+  console.log('[API Multiplayer Create] Parsed userId from bearer token:', userId)
+  if (!userId) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  let gameId = 'chimp'
+  try {
+    const body = await req.json().catch(() => ({}))
+    if (body.gameId) {
+      gameId = body.gameId
+    }
+  } catch (e) {
+    // Ignore JSON parse error, fallback to default 'chimp'
+  }
+
+  let code = generateRoomCode()
+  let attempts = 0
+
+  while (attempts < 5) {
+    try {
+      const data = await hasuraAdminRequest<{
+        insert_rooms_one: { id: string; code: string; game_id: string }
+      }>(
+        `mutation CreateRoom($code: String!, $hostId: uuid!, $gameId: String!) {
+          insert_rooms_one(object: {
+            code: $code
+            host_user_id: $hostId
+            status: "waiting"
+            game_id: $gameId
+            room_players: { data: { user_id: $hostId } }
+          }) {
+            id
+            code
+            game_id
+          }
+        }`,
+        { code, hostId: userId, gameId }
+      )
+      return Response.json({ room: data.insert_rooms_one })
+    } catch (err: any) {
+      if (err.message?.includes('unique') || err.message?.includes('duplicate')) {
+        code = generateRoomCode()
+        attempts++
+      } else {
+        console.error('Error creating room:', err)
+        return Response.json({ error: err.message || 'Failed to create room' }, { status: 500 })
+      }
+    }
+  }
+
+  return Response.json({ error: 'Failed to generate unique code' }, { status: 500 })
+}
+
+```
+
+---
+
+### File: `apis/multiplayer/game-state/route.ts`
+
+```typescript
+import { NextRequest } from 'next/server'
+import { getUserIdFromRequest } from '@/lib/multiplayer/jwt'
+import { hasuraAdminRequest } from '@/lib/hasura'
+
+export async function GET(req: NextRequest) {
+  const userId = getUserIdFromRequest(req)
+  if (!userId) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const code = req.nextUrl.searchParams.get('code')
+  if (!code) {
+    return Response.json({ error: 'Room code required' }, { status: 400 })
+  }
+
+  const uppercaseCode = code.toUpperCase().trim()
+
+  try {
+    const data = await hasuraAdminRequest<{
+      rooms: any[]
+    }>(
+      `query GetGameState($code: String!) {
+        rooms(where: { code: { _eq: $code } }) {
+          id
+          code
+          status
+          game_id
+          host_user_id
+          max_players
+          room_players(order_by: { joined_at: asc }) {
+            joined_at
+            user {
+              id
+              name
+              profile_picture
+            }
+          }
+          game_state {
+            room_id
+            state
+            updated_at
+          }
+        }
+      }`,
+      { code: uppercaseCode }
+    )
+
+    if (!data.rooms || !data.rooms.length) {
+      return Response.json({ error: 'Room not found' }, { status: 404 })
+    }
+
+    return Response.json(data)
+  } catch (err: any) {
+    console.error('Error fetching game state:', err)
+    return Response.json({ error: err.message || 'Server error' }, { status: 500 })
+  }
+}
+
+export async function POST(req: Request) {
+  const userId = getUserIdFromRequest(req)
+  if (!userId) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  let code: string
+  let stateUpdate: any
+
+  try {
+    const body = await req.json()
+    code = body.code
+    stateUpdate = body.state
+  } catch (e) {
+    return Response.json({ error: 'Invalid JSON request body' }, { status: 400 })
+  }
+
+  if (!code) return Response.json({ error: 'Room code required' }, { status: 400 })
+  if (!stateUpdate) return Response.json({ error: 'State update required' }, { status: 400 })
+
+  const uppercaseCode = code.toUpperCase().trim()
+
+  try {
+    // 1. Fetch current room details, players, and existing game state to authorize and merge
+    const data = await hasuraAdminRequest<{
+      rooms: Array<{
+        id: string
+        room_players: Array<{ user_id: string }>
+        game_state?: { state: any }
+      }>
+    }>(
+      `query VerifyAndFetchState($code: String!) {
+        rooms(where: { code: { _eq: $code } }) {
+          id
+          room_players {
+            user_id
+          }
+          game_state {
+            state
+          }
+        }
+      }`,
+      { code: uppercaseCode }
+    )
+
+    if (!data.rooms || !data.rooms.length) {
+      return Response.json({ error: 'Room not found' }, { status: 404 })
+    }
+
+    const room = data.rooms[0]
+    
+    // Check if the current user is a player in this room
+    const isPlayer = room.room_players.some(p => p.user_id === userId)
+    if (!isPlayer) {
+      return Response.json({ error: 'You are not a player in this room' }, { status: 403 })
+    }
+
+    const currentGameState = room.game_state?.state || {}
+    
+    // 2. Merge current state with updates
+    let mergedState = { ...currentGameState }
+    
+    for (const key of Object.keys(stateUpdate)) {
+      if (key === 'logs' && Array.isArray(stateUpdate[key]) && Array.isArray(currentGameState[key])) {
+        // Prepend new logs and limit to last 20
+        mergedState.logs = [...stateUpdate.logs, ...currentGameState.logs].slice(0, 20)
+      } else {
+        mergedState[key] = stateUpdate[key]
+      }
+    }
+
+    // 3. Save the merged game state back to the database
+    const updateResult = await hasuraAdminRequest<{
+      insert_game_state_one: {
+        room_id: string
+        state: any
+        updated_at: string
+      }
+    }>(
+      `mutation UpdateGameState($roomId: uuid!, $state: jsonb!) {
+        insert_game_state_one(
+          object: { room_id: $roomId, state: $state }
+          on_conflict: { constraint: game_state_pkey, update_columns: [state, updated_at] }
+        ) {
+          room_id
+          state
+          updated_at
+        }
+      }`,
+      { roomId: room.id, state: mergedState }
+    )
+
+    return Response.json({ success: true, game_state: updateResult.insert_game_state_one })
+  } catch (err: any) {
+    console.error('Error updating game state:', err)
+    return Response.json({ error: err.message || 'Server error' }, { status: 500 })
+  }
+}
+
+```
+
+---
+
+### File: `apis/multiplayer/join/route.ts`
+
+```typescript
+import { getUserIdFromRequest } from '@/lib/multiplayer/jwt'
+import { hasuraAdminRequest } from '@/lib/hasura'
+
+export async function POST(req: Request) {
+  const userId = getUserIdFromRequest(req)
+  if (!userId) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  let code: string
+  try {
+    const body = await req.json()
+    code = body.code
+  } catch (e) {
+    return Response.json({ error: 'Invalid JSON request body' }, { status: 400 })
+  }
+
+  if (!code) return Response.json({ error: 'Room code required' }, { status: 400 })
+
+  const uppercaseCode = code.toUpperCase().trim()
+
+  try {
+    // Fetch room and current player count
+    const { rooms } = await hasuraAdminRequest<{
+      rooms: Array<{
+        id: string
+        status: string
+        max_players: number
+        room_players_aggregate: { aggregate: { count: number } }
+      }>
+    }>(
+      `query GetRoom($code: String!) {
+        rooms(where: { code: { _eq: $code } }) {
+          id
+          status
+          max_players
+          room_players_aggregate { aggregate { count } }
+        }
+      }`,
+      { code: uppercaseCode }
+    )
+
+    if (!rooms || !rooms.length) {
+      return Response.json({ error: 'Room not found' }, { status: 404 })
+    }
+
+    const room = rooms[0]
+
+    if (room.status !== 'waiting') {
+      return Response.json({ error: 'Game already started' }, { status: 400 })
+    }
+
+    // if (room.room_players_aggregate.aggregate.count >= room.max_players) {
+    //   return Response.json({ error: 'Room is full' }, { status: 400 })
+    // }
+
+    // NULL max_players = unlimited
+    if (
+      typeof room.max_players === 'number' &&
+      room.room_players_aggregate.aggregate.count >= room.max_players
+    ) {
+      return Response.json({ error: 'Room is full' }, { status: 400 })
+    }
+
+
+    // Join room
+    await hasuraAdminRequest(
+      `mutation JoinRoom($roomId: uuid!, $userId: uuid!) {
+        insert_room_players_one(
+          object: { room_id: $roomId, user_id: $userId }
+          on_conflict: { constraint: room_players_pkey, update_columns: [] }
+        ) { room_id }
+      }`,
+      { roomId: room.id, userId }
+    )
+
+    return Response.json({ code: uppercaseCode })
+  } catch (err: any) {
+    console.error('Error joining room:', err)
+    return Response.json({ error: err.message || 'Failed to join room' }, { status: 500 })
+  }
+}
+
+```
+
+---
+
+### File: `apis/multiplayer/lobby-status/route.ts`
+
+```typescript
+import { NextRequest } from 'next/server'
+import { hasuraAdminRequest } from '@/lib/hasura'
+
+export async function GET(req: NextRequest) {
+  const code = req.nextUrl.searchParams.get('code')
+  if (!code) return Response.json({ error: 'Room code required' }, { status: 400 })
+
+  try {
+    const data = await hasuraAdminRequest<{
+      rooms: any[]
+    }>(
+      `query LobbyPlayers($code: String!) {
+        rooms(where: { code: { _eq: $code } }) {
+          id
+          status
+          game_id
+          host_user_id
+          max_players
+          room_players {
+            joined_at
+            user {
+              id
+              name
+              profile_picture
+            }
+          }
+        }
+      }`,
+      { code: code.toUpperCase().trim() }
+    )
+    return Response.json(data)
+  } catch (err: any) {
+    console.error('Error fetching lobby status:', err)
+    return Response.json({ error: err.message || 'Server error' }, { status: 500 })
+  }
+}
+
+```
+
+---
+
+### File: `apis/multiplayer/start/route.ts`
+
+```typescript
+import { getUserIdFromRequest } from '@/lib/multiplayer/jwt'
+import { hasuraAdminRequest } from '@/lib/hasura'
+
+export async function POST(req: Request) {
+  const userId = getUserIdFromRequest(req)
+  if (!userId) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  let code: string
+  let gameId = 'chimp'
+  let initialState: any = null
+
+  try {
+    const body = await req.json()
+    code = body.code
+    if (body.gameId) {
+      gameId = body.gameId
+    }
+    if (body.initialState) {
+      initialState = body.initialState
+    }
+  } catch (e) {
+    return Response.json({ error: 'Invalid JSON request body' }, { status: 400 })
+  }
+
+  if (!code) return Response.json({ error: 'Room code required' }, { status: 400 })
+
+  const uppercaseCode = code.toUpperCase().trim()
+
+  try {
+    const { rooms } = await hasuraAdminRequest<{
+      rooms: Array<{ id: string; host_user_id: string; status: string }>
+    }>(
+      `query GetRoom($code: String!) {
+        rooms(where: { code: { _eq: $code } }) {
+          id
+          host_user_id
+          status
+        }
+      }`,
+      { code: uppercaseCode }
+    )
+
+    if (!rooms || !rooms.length) {
+      return Response.json({ error: 'Room not found' }, { status: 404 })
+    }
+
+    const room = rooms[0]
+
+    if (room.host_user_id !== userId) {
+      return Response.json({ error: 'Only the host can start the game' }, { status: 403 })
+    }
+
+    if (room.status !== 'waiting') {
+      return Response.json({ error: 'Game already started' }, { status: 400 })
+    }
+
+    // Default configuration for standard games, or use client-provided initial state
+    const state = initialState || {
+      score: 0,
+      turn: 1,
+      timeLeft: 60,
+      logs: ['Multiplayer session started.', 'Let the game begin!']
+    }
+
+    await hasuraAdminRequest(
+      `mutation StartGame($id: uuid!, $gameId: String!, $state: jsonb!) {
+        update_rooms_by_pk(
+          pk_columns: { id: $id }
+          _set: { status: "in_game", game_id: $gameId }
+        ) { 
+          id 
+          status 
+          game_id
+        }
+        insert_game_state_one(
+          object: { room_id: $id, state: $state }
+          on_conflict: { constraint: game_state_pkey, update_columns: [state, updated_at] }
+        ) {
+          room_id
+          state
+          updated_at
+        }
+      }`,
+      { id: room.id, gameId, state }
+    )
+
+    return Response.json({ success: true })
+  } catch (err: any) {
+    console.error('Error starting game:', err)
+    return Response.json({ error: err.message || 'Failed to start game' }, { status: 500 })
+  }
+}
+
+```
+
+---
+
 ### File: `app/api/auth/[...nextauth]/route.ts`
 
 ```typescript
@@ -86,6 +552,1085 @@ export async function GET() {
   const token = generateHasuraToken(session.user.id)
   return Response.json({ token })
 }
+
+```
+
+---
+
+### File: `app/api/bidding/bid/route.ts`
+
+```typescript
+import { getUserIdFromRequest } from '@/lib/multiplayer/jwt'
+import { hasuraAdminRequest } from '@/lib/hasura'
+
+type BidBody = {
+  code: string
+  amount: number
+}
+
+export async function POST(req: Request) {
+  const userId = getUserIdFromRequest(req)
+
+  if (!userId) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  let body: BidBody
+
+  try {
+    body = await req.json()
+  } catch {
+    return Response.json({ error: 'Invalid JSON request body' }, { status: 400 })
+  }
+
+  if (!body.code) {
+    return Response.json({ error: 'Room code required' }, { status: 400 })
+  }
+
+  const bidAmount = Number(body.amount)
+
+  if (!Number.isFinite(bidAmount) || bidAmount <= 0) {
+    return Response.json({ error: 'Invalid bid amount' }, { status: 400 })
+  }
+
+  const code = body.code.toUpperCase().trim()
+
+  try {
+    const roomData = await hasuraAdminRequest<{
+      rooms: Array<{
+        id: string
+        status: string
+        game_id: string
+        game_state?: {
+          state: any
+        } | null
+      }>
+    }>(
+      `query GetBiddingBidRoom($code: String!) {
+        rooms(where: { code: { _eq: $code } }, limit: 1) {
+          id
+          status
+          game_id
+          game_state {
+            state
+          }
+        }
+      }`,
+      { code }
+    )
+
+    const room = roomData.rooms?.[0]
+
+    if (!room) {
+      return Response.json({ error: 'Room not found' }, { status: 404 })
+    }
+
+    if (room.game_id !== 'bidding') {
+      return Response.json({ error: 'Bidding game is not active in this room' }, { status: 400 })
+    }
+
+    const state = room.game_state?.state || {}
+    const bidding = state.bidding
+
+    if (!bidding) {
+      return Response.json({ error: 'Bidding state not initialized' }, { status: 400 })
+    }
+
+    if (bidding.phase !== 'auction' || !bidding.currentNominee) {
+      return Response.json({ error: 'No active auction right now' }, { status: 400 })
+    }
+
+    const leader = bidding.leaders?.[userId]
+
+    if (!leader) {
+      return Response.json({ error: 'Only leaders can place bids' }, { status: 403 })
+    }
+
+    if (!leader.teamId) {
+    return Response.json(
+      {
+        error: 'Leader teamId missing in bidding state. Restart bidding after fixing start route.',
+        debug: {
+          leader,
+          leaderUserId: userId,
+        },
+      },
+      { status: 400 }
+    )
+  }
+
+    const currentAmount = Number(bidding.currentBid?.amount || 0)
+    const minIncrement = Number(bidding.minIncrement || 1)
+
+    if (bidAmount < currentAmount + minIncrement) {
+      return Response.json(
+        { error: `Bid must be at least ${currentAmount + minIncrement}` },
+        { status: 400 }
+      )
+    }
+
+    if (bidAmount > Number(leader.tokensLeft || 0)) {
+      return Response.json(
+        { error: 'You do not have enough tokens for this bid' },
+        { status: 400 }
+      )
+    }
+
+    const updatedBid = {
+      amount: bidAmount,
+      leaderUserId: userId,
+      leaderName: leader.name,
+      teamId: leader.teamId,
+      teamName: leader.teamName,
+      placedAt: new Date().toISOString(),
+    }
+
+    const nomineeName = bidding.currentNominee?.name || 'Current member'
+
+    const updatedBidding = {
+      ...bidding,
+      currentBid: updatedBid,
+      logs: [
+        `${leader.name} bid ${bidAmount.toLocaleString()} on ${nomineeName}.`,
+        ...(bidding.logs || []),
+      ].slice(0, 50),
+    }
+
+    const updatedState = {
+      ...state,
+      bidding: updatedBidding,
+    }
+
+    await hasuraAdminRequest(
+      `mutation PlaceBiddingBid($roomId: uuid!, $state: jsonb!) {
+        insert_game_state_one(
+          object: {
+            room_id: $roomId
+            state: $state
+          }
+          on_conflict: {
+            constraint: game_state_pkey
+            update_columns: [state, updated_at]
+          }
+        ) {
+          room_id
+          state
+          updated_at
+        }
+      }`,
+      {
+        roomId: room.id,
+        state: updatedState,
+      }
+    )
+
+    return Response.json({
+      success: true,
+      bid: updatedBid,
+      bidding: updatedBidding,
+    })
+  } catch (err: any) {
+    console.error('Place bid error:', err)
+    return Response.json(
+      { error: err.message || 'Failed to place bid' },
+      { status: 500 }
+    )
+  }
+}
+
+```
+
+---
+
+### File: `app/api/bidding/close/route.ts`
+
+```typescript
+import { getUserIdFromRequest } from '@/lib/multiplayer/jwt'
+import { hasuraAdminRequest } from '@/lib/hasura'
+
+type CloseBody = {
+  code: string
+}
+
+export async function POST(req: Request) {
+  const userId = getUserIdFromRequest(req)
+
+  if (!userId) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  let body: CloseBody
+
+  try {
+    body = await req.json()
+  } catch {
+    return Response.json({ error: 'Invalid JSON request body' }, { status: 400 })
+  }
+
+  if (!body.code) {
+    return Response.json({ error: 'Room code required' }, { status: 400 })
+  }
+
+  const code = body.code.toUpperCase().trim()
+
+  try {
+    const roomData = await hasuraAdminRequest<{
+      rooms: Array<{
+        id: string
+        host_user_id: string
+        status: string
+        game_id: string
+        game_state?: {
+          state: any
+        } | null
+      }>
+    }>(
+      `query GetBiddingCloseRoom($code: String!) {
+        rooms(where: { code: { _eq: $code } }, limit: 1) {
+          id
+          host_user_id
+          status
+          game_id
+          game_state {
+            state
+          }
+        }
+      }`,
+      { code }
+    )
+
+    const room = roomData.rooms?.[0]
+
+    if (!room) {
+      return Response.json({ error: 'Room not found' }, { status: 404 })
+    }
+
+    if (room.host_user_id !== userId) {
+      return Response.json({ error: 'Only the host can close bidding' }, { status: 403 })
+    }
+
+    if (room.game_id !== 'bidding') {
+      return Response.json({ error: 'Bidding game is not active in this room' }, { status: 400 })
+    }
+
+    const state = room.game_state?.state || {}
+    const bidding = state.bidding
+
+    if (!bidding) {
+      return Response.json({ error: 'Bidding state not initialized' }, { status: 400 })
+    }
+
+    if (bidding.phase !== 'auction' || !bidding.currentNominee) {
+      return Response.json({ error: 'No active auction to close' }, { status: 400 })
+    }
+
+    // const currentBid = bidding.currentBid
+    // const nominee = bidding.currentNominee
+
+    // if (!currentBid?.leaderUserId || !currentBid?.teamId || Number(currentBid.amount || 0) <= 0) {
+    //   return Response.json(
+    //     { error: 'Cannot close auction because no valid bid has been placed' },
+    //     { status: 400 }
+    //   )
+    // }
+
+    // const leader = bidding.leaders?.[currentBid.leaderUserId]
+
+    const currentBid = bidding.currentBid
+    const nominee = bidding.currentNominee
+
+    if (!currentBid?.leaderUserId || Number(currentBid.amount || 0) <= 0) {
+      return Response.json(
+        {
+          error: 'Cannot close auction because no valid bid has been placed',
+          debug: { currentBid },
+        },
+        { status: 400 }
+      )
+    }
+
+    const leader = bidding.leaders?.[currentBid.leaderUserId]
+
+    if (!leader) {
+      return Response.json(
+        {
+          error: 'Winning leader not found in bidding state',
+          debug: {
+            currentBid,
+            availableLeaderIds: Object.keys(bidding.leaders || {}),
+          },
+        },
+        { status: 400 }
+      )
+    }
+
+    const winningTeamId = currentBid.teamId || leader.teamId
+    const winningTeamName = currentBid.teamName || leader.teamName
+
+    if (!winningTeamId) {
+      return Response.json(
+        {
+          error: 'Winning teamId missing. Restart bidding after fixing leader state.',
+          debug: {
+            currentBid,
+            leader,
+          },
+        },
+        { status: 400 }
+      )
+    }
+
+    if (!leader) {
+      return Response.json({ error: 'Winning leader not found in bidding state' }, { status: 400 })
+    }
+
+    const bidAmount = Number(currentBid.amount)
+
+    if (bidAmount > Number(leader.tokensLeft || 0)) {
+      return Response.json(
+        { error: 'Winning leader no longer has enough tokens' },
+        { status: 400 }
+      )
+    }
+
+    const updatedLeader = {
+      ...leader,
+      tokensLeft: Number(leader.tokensLeft || 0) - bidAmount,
+      spent: Number(leader.spent || 0) + bidAmount,
+      membersWon: [
+        ...(leader.membersWon || []),
+        {
+          userId: nominee.userId,
+          name: nominee.name,
+          amount: bidAmount,
+          wonAt: new Date().toISOString(),
+        },
+      ],
+    }
+
+    const updatedEntries = Array.isArray(bidding.entries)
+      ? bidding.entries.map((entry: any) => {
+          if (entry.userId !== nominee.userId) return entry
+
+          return {
+            ...entry,
+            sold: true,
+            soldToLeaderId: currentBid.leaderUserId,
+            // soldToTeamId: currentBid.teamId,
+            soldToTeamId: winningTeamId,
+            soldAmount: bidAmount,
+          }
+        })
+      : []
+
+    const soldRecord = {
+      userId: nominee.userId,
+      name: nominee.name,
+      profilePicture: nominee.profilePicture || null,
+      teamId: winningTeamId,
+      teamName: currentBid.teamName,
+      leaderUserId: currentBid.leaderUserId,
+      leaderName: currentBid.leaderName,
+      amount: bidAmount,
+      soldAt: new Date().toISOString(),
+    }
+
+    const remainingEntries = updatedEntries.filter((entry: any) => !entry.sold)
+
+    const updatedBidding = {
+      ...bidding,
+      phase: remainingEntries.length === 0 ? 'finished' : 'waiting',
+      leaders: {
+        ...bidding.leaders,
+        [currentBid.leaderUserId]: updatedLeader,
+      },
+      entries: updatedEntries,
+      currentNominee: null,
+      currentBid: null,
+      sold: [soldRecord, ...(bidding.sold || [])],
+      endedAt: remainingEntries.length === 0 ? new Date().toISOString() : bidding.endedAt || null,
+      logs: [
+        `${nominee.name} sold to ${currentBid.teamName} for ${bidAmount.toLocaleString()} tokens.`,
+        ...(bidding.logs || []),
+      ].slice(0, 50),
+    }
+
+    const updatedState = {
+      ...state,
+      bidding: updatedBidding,
+    }
+
+    await hasuraAdminRequest(
+      `mutation CloseBiddingAuction(
+        $roomId: uuid!
+        $state: jsonb!
+        $teamId: uuid!
+        $memberUserId: uuid!
+        $roomStatus: String!
+      ) {
+        insert_team_members_one(
+          object: {
+            team_id: $teamId
+            user_id: $memberUserId
+            member_type: "MEMBER"
+          }
+          on_conflict: {
+            constraint: team_members_pkey
+            update_columns: []
+          }
+        ) {
+          id
+        }
+
+        update_rooms_by_pk(
+          pk_columns: { id: $roomId }
+          _set: { status: $roomStatus }
+        ) {
+          id
+          status
+        }
+
+        insert_game_state_one(
+          object: {
+            room_id: $roomId
+            state: $state
+          }
+          on_conflict: {
+            constraint: game_state_pkey
+            update_columns: [state, updated_at]
+          }
+        ) {
+          room_id
+          state
+          updated_at
+        }
+      }`,
+      {
+        roomId: room.id,
+        state: updatedState,
+        // teamId: currentBid.teamId,
+        teamId: winningTeamId,
+        memberUserId: nominee.userId,
+        roomStatus: remainingEntries.length === 0 ? 'finished' : 'in_game',
+      }
+    )
+
+    return Response.json({
+      success: true,
+      sold: soldRecord,
+      finished: remainingEntries.length === 0,
+      bidding: updatedBidding,
+    })
+  } catch (err: any) {
+    console.error('Close bidding error:', err)
+    return Response.json(
+      { error: err.message || 'Failed to close bidding auction' },
+      { status: 500 }
+    )
+  }
+}
+
+```
+
+---
+
+### File: `app/api/bidding/draw/route.ts`
+
+```typescript
+import { getUserIdFromRequest } from '@/lib/multiplayer/jwt'
+import { hasuraAdminRequest } from '@/lib/hasura'
+
+type DrawBody = {
+  code: string
+}
+
+export async function POST(req: Request) {
+  const userId = getUserIdFromRequest(req)
+
+  if (!userId) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  let body: DrawBody
+
+  try {
+    body = await req.json()
+  } catch {
+    return Response.json({ error: 'Invalid JSON request body' }, { status: 400 })
+  }
+
+  if (!body.code) {
+    return Response.json({ error: 'Room code required' }, { status: 400 })
+  }
+
+  const code = body.code.toUpperCase().trim()
+
+  try {
+    const roomData = await hasuraAdminRequest<{
+      rooms: Array<{
+        id: string
+        host_user_id: string
+        status: string
+        game_id: string
+        game_state?: {
+          state: any
+        } | null
+      }>
+    }>(
+      `query GetBiddingDrawRoom($code: String!) {
+        rooms(where: { code: { _eq: $code } }, limit: 1) {
+          id
+          host_user_id
+          status
+          game_id
+          game_state {
+            state
+          }
+        }
+      }`,
+      { code }
+    )
+
+    const room = roomData.rooms?.[0]
+
+    if (!room) {
+      return Response.json({ error: 'Room not found' }, { status: 404 })
+    }
+
+    if (room.host_user_id !== userId) {
+      return Response.json({ error: 'Only the host can draw a member' }, { status: 403 })
+    }
+
+    if (room.game_id !== 'bidding') {
+      return Response.json({ error: 'Bidding game is not active in this room' }, { status: 400 })
+    }
+
+    const state = room.game_state?.state || {}
+    const bidding = state.bidding
+
+    if (!bidding) {
+      return Response.json({ error: 'Bidding state not initialized' }, { status: 400 })
+    }
+
+    if (bidding.phase === 'auction' && bidding.currentNominee) {
+      return Response.json(
+        { error: 'An auction is already active. Close it before drawing another member.' },
+        { status: 400 }
+      )
+    }
+
+    // const availableEntries = Array.isArray(bidding.entries)
+    //   ? bidding.entries.filter((entry: any) => !entry.sold)
+    //   : []
+    const leaderIds = new Set(Object.keys(bidding.leaders || {}))
+
+    const availableEntries = Array.isArray(bidding.entries)
+      ? bidding.entries.filter((entry: any) => {
+          return (
+            !entry.sold &&
+            entry.userId !== room.host_user_id &&
+            !leaderIds.has(entry.userId)
+          )
+        })
+      : []
+
+    if (availableEntries.length === 0) {
+      const finishedBidding = {
+        ...bidding,
+        phase: 'finished',
+        currentNominee: null,
+        currentBid: null,
+        endedAt: new Date().toISOString(),
+        logs: [
+          'Bidding finished. No entries left.',
+          ...(bidding.logs || []),
+        ].slice(0, 50),
+      }
+
+      const finishedState = {
+        ...state,
+        bidding: finishedBidding,
+      }
+
+      await hasuraAdminRequest(
+        `mutation FinishBiddingNoEntries($roomId: uuid!, $state: jsonb!) {
+          update_rooms_by_pk(
+            pk_columns: { id: $roomId }
+            _set: { status: "finished" }
+          ) {
+            id
+            status
+          }
+
+          insert_game_state_one(
+            object: {
+              room_id: $roomId
+              state: $state
+            }
+            on_conflict: {
+              constraint: game_state_pkey
+              update_columns: [state, updated_at]
+            }
+          ) {
+            room_id
+          }
+        }`,
+        {
+          roomId: room.id,
+          state: finishedState,
+        }
+      )
+
+      return Response.json({
+        success: true,
+        finished: true,
+        bidding: finishedBidding,
+      })
+    }
+
+    const randomIndex = Math.floor(Math.random() * availableEntries.length)
+    const nominee = availableEntries[randomIndex]
+
+    const updatedBidding = {
+      ...bidding,
+      phase: 'auction',
+      currentNominee: nominee,
+      currentBid: {
+        amount: 0,
+        leaderUserId: null,
+        leaderName: null,
+        teamId: null,
+        teamName: null,
+        placedAt: null,
+      },
+      logs: [
+        `${nominee.name} is now open for bidding.`,
+        ...(bidding.logs || []),
+      ].slice(0, 50),
+    }
+
+    const updatedState = {
+      ...state,
+      bidding: updatedBidding,
+    }
+
+    await hasuraAdminRequest(
+      `mutation DrawBiddingMember($roomId: uuid!, $state: jsonb!) {
+        insert_game_state_one(
+          object: {
+            room_id: $roomId
+            state: $state
+          }
+          on_conflict: {
+            constraint: game_state_pkey
+            update_columns: [state, updated_at]
+          }
+        ) {
+          room_id
+          state
+          updated_at
+        }
+      }`,
+      {
+        roomId: room.id,
+        state: updatedState,
+      }
+    )
+
+    return Response.json({
+      success: true,
+      nominee,
+      bidding: updatedBidding,
+    })
+  } catch (err: any) {
+    console.error('Draw bidding member error:', err)
+    return Response.json(
+      { error: err.message || 'Failed to draw bidding member' },
+      { status: 500 }
+    )
+  }
+}
+
+```
+
+---
+
+### File: `app/api/bidding/start/route.ts`
+
+```typescript
+import { getUserIdFromRequest } from '@/lib/multiplayer/jwt'
+import { hasuraAdminRequest } from '@/lib/hasura'
+
+const DEFAULT_STARTING_TOKENS = 1_000_000
+const DEFAULT_MIN_INCREMENT = 50_000
+
+type StartBiddingBody = {
+  code: string
+  startingTokens?: number
+  minIncrement?: number
+}
+
+export async function POST(req: Request) {
+  const userId = getUserIdFromRequest(req)
+
+  if (!userId) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  let body: StartBiddingBody
+
+  try {
+    body = await req.json()
+  } catch {
+    return Response.json({ error: 'Invalid JSON request body' }, { status: 400 })
+  }
+
+  if (!body.code) {
+    return Response.json({ error: 'Room code required' }, { status: 400 })
+  }
+
+  const code = body.code.toUpperCase().trim()
+  const startingTokens = Number(body.startingTokens || DEFAULT_STARTING_TOKENS)
+  const minIncrement = Number(body.minIncrement || DEFAULT_MIN_INCREMENT)
+
+  if (!Number.isFinite(startingTokens) || startingTokens <= 0) {
+    return Response.json({ error: 'Invalid starting token amount' }, { status: 400 })
+  }
+
+  if (!Number.isFinite(minIncrement) || minIncrement <= 0) {
+    return Response.json({ error: 'Invalid minimum increment amount' }, { status: 400 })
+  }
+
+  try {
+    const roomData = await hasuraAdminRequest<{
+    rooms: Array<{
+      id: string
+      code: string
+      status: string
+      game_id: string
+      host_user_id: string
+      room_players: Array<{
+        user_id: string
+        user: {
+          id: string
+          name: string | null
+          profile_picture: string | null
+        } | null
+      }>
+      game_state?: {
+        state: any
+      } | null
+    }>
+  }>(
+    `query GetBiddingStartRoom($code: String!) {
+      rooms(where: { code: { _eq: $code } }, limit: 1) {
+        id
+        code
+        status
+        game_id
+        host_user_id
+
+        room_players(order_by: { joined_at: asc }) {
+          user_id
+          user {
+            id
+            name
+            profile_picture
+          }
+        }
+
+        game_state {
+          state
+        }
+      }
+    }`,
+    { code }
+  )
+
+  const room = roomData.rooms?.[0]
+
+  if (!room) {
+    return Response.json({ error: 'Room not found' }, { status: 404 })
+  }
+
+  if (room.host_user_id !== userId) {
+    return Response.json({ error: 'Only the host can start bidding' }, { status: 403 })
+  }
+
+  if (room.status !== 'finished' && room.status !== 'in_game') {
+    return Response.json(
+      { error: 'Persona Flow must be completed in this room before bidding can start.' },
+      { status: 400 }
+    )
+  }
+  const teamsData = await hasuraAdminRequest<{
+    teams: Array<{
+      id: string
+      name: string
+      color: string | null
+      leader_id: string | null
+      persona_id: string | null
+      persona_name: string | null
+      persona_hex: string | null
+    }>
+  }>(
+    `query GetBiddingRoomTeams($roomId: uuid!) {
+      teams(where: { room_id: { _eq: $roomId } }) {
+        id
+        name
+        color
+        leader_id
+        persona_id
+        persona_name
+        persona_hex
+      }
+    }`,
+    { roomId: room.id }
+  )
+
+  const teamIds = teamsData.teams.map((team) => team.id)
+
+  if (teamIds.length === 0) {
+    return Response.json(
+      {
+        error: 'No teams found in this room. Run Persona Flow in this same room first.',
+        debug: {
+          roomId: room.id,
+          roomCode: room.code,
+          roomPlayerCount: room.room_players.length,
+        },
+      },
+      { status: 400 }
+    )
+  }
+
+  const teamMembersData = await hasuraAdminRequest<{
+    team_members: Array<{
+      team_id: string
+      user_id: string
+      member_type: string
+      user: {
+        id: string
+        name: string | null
+        profile_picture: string | null
+      } | null
+    }>
+  }>(
+    `query GetBiddingTeamMembers($teamIds: [uuid!]!) {
+      team_members(where: { team_id: { _in: $teamIds } }) {
+        team_id
+        user_id
+        member_type
+        user {
+          id
+          name
+          profile_picture
+        }
+      }
+    }`,
+    { teamIds }
+  )
+
+  const leaderMembers = teamMembersData.team_members.filter(
+    (member) => String(member.member_type).toUpperCase() === 'LEADER'
+  )
+
+  if (leaderMembers.length === 0) {
+    return Response.json(
+      {
+        error: 'No leaders found in this room. Persona Flow must create team_members with member_type LEADER.',
+        debug: {
+          roomId: room.id,
+          roomCode: room.code,
+          teamsFound: teamsData.teams.length,
+          teamMembersFound: teamMembersData.team_members.length,
+          memberTypesFound: teamMembersData.team_members.map((member) => ({
+            userId: member.user_id,
+            teamId: member.team_id,
+            memberType: member.member_type,
+          })),
+        },
+      },
+      { status: 400 }
+    )
+  }
+
+
+  
+  const teamById = new Map(teamsData.teams.map((team) => [team.id, team]))
+
+  const playersById = new Map(
+    room.room_players.map((player) => [player.user_id, player])
+  )
+
+  const leaderIds = new Set(leaderMembers.map((member) => member.user_id))
+
+  const leaders = Object.fromEntries(
+    leaderMembers.map((member) => {
+      const team = teamById.get(member.team_id)
+      const player = playersById.get(member.user_id)
+
+      return [
+        member.user_id,
+        {
+          userId: member.user_id,
+          name: member.user?.name || player?.user?.name || 'Unnamed Leader',
+          profilePicture:
+            member.user?.profile_picture || player?.user?.profile_picture || null,
+          teamId: member.team_id,
+          teamName: team?.name || 'Unnamed Team',
+          teamColor: team?.color || null,
+          personaId: team?.persona_id || null,
+          personaName: team?.persona_name || null,
+          personaHex: team?.persona_hex || null,
+          tokensLeft: startingTokens,
+          spent: 0,
+          membersWon: [],
+        },
+      ]
+    })
+  )
+
+  
+
+    // const entries = room.room_players
+    //   .filter((player) => !leaderIds.has(player.user_id))
+    //   .map((player) => ({
+    //     userId: player.user_id,
+    //     name: player.user?.name || 'Unnamed Member',
+    //     profilePicture: player.user?.profile_picture || null,
+
+    //     // Keep these fields ready for later.
+    //     // Once your users/profile table has these columns, we can fetch real values.
+    //     skills: [],
+    //     affiliation: null,
+
+    //     sold: false,
+    //     soldToLeaderId: null,
+    //     soldToTeamId: null,
+    //     soldAmount: null,
+    //   }))
+
+
+    // const entries = room.room_players
+    // .filter((player) => !leaderIds.has(player.user_id))
+    // .map((player) => ({
+    //   userId: player.user_id,
+    //   name: player.user?.name || 'Unnamed Member',
+    //   profilePicture: player.user?.profile_picture || null,
+    //   skills: [],
+    //   affiliation: null,
+    //   sold: false,
+    //   soldToLeaderId: null,
+    //   soldToTeamId: null,
+    //   soldAmount: null,
+    // }))
+
+    const excludedUserIds = new Set<string>([
+      room.host_user_id,
+      ...Array.from(leaderIds),
+    ])
+
+    const entries = room.room_players
+      .filter((player) => !excludedUserIds.has(player.user_id))
+      .map((player) => ({
+        userId: player.user_id,
+        name: player.user?.name || 'Unnamed Member',
+        profilePicture: player.user?.profile_picture || null,
+        skills: [],
+        affiliation: null,
+        sold: false,
+        soldToLeaderId: null,
+        soldToTeamId: null,
+        soldAmount: null,
+      }))
+
+    if (entries.length === 0) {
+      return Response.json(
+        {
+          error: 'No eligible members available for bidding. Host and leaders are excluded from the bidding pool.',
+          debug: {
+            roomPlayerCount: room.room_players.length,
+            hostUserId: room.host_user_id,
+            leaderIds: Array.from(leaderIds),
+          },
+        },
+        { status: 400 }
+      )
+    }
+
+    const previousState = room.game_state?.state || {}
+
+    const biddingState = {
+      phase: 'waiting',
+      startingTokens,
+      minIncrement,
+      leaders,
+      entries,
+      currentNominee: null,
+      currentBid: null,
+      sold: [],
+      unsold: [],
+      logs: [
+        `Bidding initialized with ${leaderMembers.length} leaders and ${entries.length} entries.`,
+      ],
+      startedAt: new Date().toISOString(),
+      endedAt: null,
+    }
+
+    const newState = {
+      ...previousState,
+      bidding: biddingState,
+    }
+
+    await hasuraAdminRequest(
+      `mutation StartBiddingGame($roomId: uuid!, $state: jsonb!) {
+        update_rooms_by_pk(
+          pk_columns: { id: $roomId }
+          _set: {
+            status: "in_game"
+            game_id: "bidding"
+          }
+        ) {
+          id
+          status
+          game_id
+        }
+
+        insert_game_state_one(
+          object: {
+            room_id: $roomId
+            state: $state
+          }
+          on_conflict: {
+            constraint: game_state_pkey
+            update_columns: [state, updated_at]
+          }
+        ) {
+          room_id
+          state
+          updated_at
+        }
+      }`,
+      {
+        roomId: room.id,
+        state: newState,
+      }
+    )
+
+    return Response.json({
+      success: true,
+      bidding: biddingState,
+    })
+  } catch (err: any) {
+    console.error('Start bidding error:', err)
+    return Response.json(
+      { error: err.message || 'Failed to start bidding' },
+      { status: 500 }
+    )
+  }
+}
+
 
 ```
 
@@ -157,6 +1702,162 @@ export async function POST(req: Request) {
 
 ---
 
+### File: `app/api/multiplayer/end/route.ts`
+
+```typescript
+import { getUserIdFromRequest } from '@/lib/multiplayer/jwt'
+import { hasuraAdminRequest } from '@/lib/hasura'
+
+type EndGameBody = {
+  code: string
+  reason?: string
+}
+
+export async function POST(req: Request) {
+  const userId = getUserIdFromRequest(req)
+
+  if (!userId) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  let body: EndGameBody
+
+  try {
+    body = await req.json()
+  } catch {
+    return Response.json({ error: 'Invalid JSON request body' }, { status: 400 })
+  }
+
+  if (!body.code) {
+    return Response.json({ error: 'Room code required' }, { status: 400 })
+  }
+
+  const code = body.code.toUpperCase().trim()
+
+  try {
+    const data = await hasuraAdminRequest<{
+      rooms: Array<{
+        id: string
+        code: string
+        status: string
+        game_id: string
+        host_user_id: string
+        game_state?: {
+          state: any
+        } | null
+      }>
+    }>(
+      `query GetRoomForEndGame($code: String!) {
+        rooms(where: { code: { _eq: $code } }, limit: 1) {
+          id
+          code
+          status
+          game_id
+          host_user_id
+          game_state {
+            state
+          }
+        }
+      }`,
+      { code }
+    )
+
+    const room = data.rooms?.[0]
+
+    if (!room) {
+      return Response.json({ error: 'Room not found' }, { status: 404 })
+    }
+
+    if (room.host_user_id !== userId) {
+      return Response.json({ error: 'Only the host can end the game' }, { status: 403 })
+    }
+
+    if (room.status === 'finished') {
+      return Response.json({ success: true, alreadyFinished: true })
+    }
+
+    const previousState = room.game_state?.state || {}
+
+    const endedAt = new Date().toISOString()
+
+    const nextState = {
+      ...previousState,
+      endedByHost: true,
+      endedAt,
+      endReason: body.reason || 'Host ended the game',
+      logs: [
+        `Host ended ${room.game_id} at ${endedAt}.`,
+        ...(Array.isArray(previousState.logs) ? previousState.logs : []),
+      ].slice(0, 50),
+    }
+
+    if (room.game_id === 'persona-flow') {
+      nextState.personaFlow = {
+        ...(previousState.personaFlow || {}),
+        ended: true,
+        endedByHost: true,
+        readyForBidding: true,
+      }
+    }
+
+    if (room.game_id === 'bidding') {
+      nextState.bidding = {
+        ...(previousState.bidding || {}),
+        phase: 'finished',
+        endedAt,
+        endedByHost: true,
+      }
+    }
+
+    await hasuraAdminRequest(
+      `mutation EndCurrentGame($roomId: uuid!, $state: jsonb!) {
+        update_rooms_by_pk(
+          pk_columns: { id: $roomId }
+          _set: { status: "finished" }
+        ) {
+          id
+          status
+        }
+
+        insert_game_state_one(
+          object: {
+            room_id: $roomId
+            state: $state
+          }
+          on_conflict: {
+            constraint: game_state_pkey
+            update_columns: [state, updated_at]
+          }
+        ) {
+          room_id
+          state
+          updated_at
+        }
+      }`,
+      {
+        roomId: room.id,
+        state: nextState,
+      }
+    )
+
+    return Response.json({
+      success: true,
+      status: 'finished',
+      gameId: room.game_id,
+    })
+  } catch (err: any) {
+    console.error('End game error:', err)
+    return Response.json(
+      { error: err.message || 'Failed to end game' },
+      { status: 500 }
+    )
+  }
+}
+
+```
+
+---
+
 ### File: `app/api/multiplayer/game-state/route.ts`
 
 ```typescript
@@ -189,6 +1890,7 @@ export async function GET(req: NextRequest) {
           game_id
           host_user_id
           max_players
+          
           room_players(order_by: { joined_at: asc }) {
             joined_at
             user {
@@ -197,6 +1899,27 @@ export async function GET(req: NextRequest) {
               profile_picture
             }
           }
+
+          room_persona_claims(order_by: { claimed_at: asc }) {
+          id
+          user_id
+          domain_id
+          domain_name
+          domain_description
+          domain_icon
+          persona_id
+          persona_name
+          persona_hex
+          persona_asset_path
+          claimed_at
+          user {
+            id
+            name
+            profile_picture
+          }
+        }
+
+  
           game_state {
             room_id
             state
@@ -376,9 +2099,18 @@ export async function POST(req: Request) {
       return Response.json({ error: 'Game already started' }, { status: 400 })
     }
 
-    if (room.room_players_aggregate.aggregate.count >= room.max_players) {
+    // if (room.room_players_aggregate.aggregate.count >= room.max_players) {
+    //   return Response.json({ error: 'Room is full' }, { status: 400 })
+    // }
+
+    // NULL max_players = unlimited
+    if (
+      typeof room.max_players === 'number' &&
+      room.room_players_aggregate.aggregate.count >= room.max_players
+    ) {
       return Response.json({ error: 'Room is full' }, { status: 400 })
     }
+
 
     // Join room
     await hasuraAdminRequest(
@@ -548,323 +2280,499 @@ export async function POST(req: Request) {
 
 ---
 
+### File: `app/api/persona-flow/claim/route.ts`
+
+```typescript
+import { getUserIdFromRequest } from '@/lib/multiplayer/jwt'
+import { hasuraAdminRequest } from '@/lib/hasura'
+
+type ClaimBody = {
+  code: string
+  domain: {
+    id: string
+    name: string
+    description?: string
+    icon?: string
+  }
+  persona: {
+    id: string
+    name: string
+    color_code: string
+    asset_path?: string
+  }
+}
+
+export async function POST(req: Request) {
+  const userId = getUserIdFromRequest(req)
+  if (!userId) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  let body: ClaimBody
+
+  try {
+    body = await req.json()
+  } catch {
+    return Response.json({ error: 'Invalid JSON request body' }, { status: 400 })
+  }
+
+  if (!body.code || !body.domain || !body.persona) {
+    return Response.json({ error: 'Missing code, domain, or persona' }, { status: 400 })
+  }
+
+  const code = body.code.toUpperCase().trim()
+
+  try {
+    const roomData = await hasuraAdminRequest<{
+    rooms: Array<{
+      id: string
+      status: string
+      game_id: string
+      host_user_id: string
+      room_players: Array<{ user_id: string }>
+      game_state?: {
+        state: any
+      } | null
+    }>
+  }>(
+      `query GetPersonaRoom($code: String!) {
+        rooms(where: { code: { _eq: $code } }) {
+          id
+          status
+          game_id
+          host_user_id
+          room_players {
+            user_id
+          }
+          game_state {
+            state
+          }
+        }
+      }  `,
+      { code }
+    )
+
+    const room = roomData.rooms?.[0]
+
+    if (!room) {
+      return Response.json({ error: 'Room not found' }, { status: 404 })
+    }
+
+    if (room.status !== 'in_game' || room.game_id !== 'persona-flow') {
+      return Response.json({ error: 'Persona Flow is not active in this room' }, { status: 400 })
+    }
+
+    if (room.host_user_id === userId) {
+      return Response.json({ error: 'Host cannot claim a persona' }, { status: 403 })
+    }
+
+    const isPlayer = room.room_players.some((p) => p.user_id === userId)
+    if (!isPlayer) {
+      return Response.json({ error: 'You are not a player in this room' }, { status: 403 })
+    }
+
+    const claimResult = await hasuraAdminRequest<{
+      insert_room_persona_claims: {
+        affected_rows: number
+        returning: Array<{
+          id: string
+          room_id: string
+          user_id: string
+          persona_id: string
+          persona_name: string
+          persona_hex: string
+          domain_id: string
+          domain_name: string
+          claimed_at: string
+        }>
+      }
+    }>(
+      `mutation TryClaimPersona(
+        $roomId: uuid!
+        $userId: uuid!
+        $domainId: String!
+        $domainName: String!
+        $domainDescription: String
+        $domainIcon: String
+        $personaId: String!
+        $personaName: String!
+        $personaHex: String!
+        $personaAssetPath: String
+      ) {
+        insert_room_persona_claims(
+          objects: [{
+            room_id: $roomId
+            user_id: $userId
+            domain_id: $domainId
+            domain_name: $domainName
+            domain_description: $domainDescription
+            domain_icon: $domainIcon
+            persona_id: $personaId
+            persona_name: $personaName
+            persona_hex: $personaHex
+            persona_asset_path: $personaAssetPath
+          }]
+          on_conflict: {
+            constraint: room_persona_claims_room_persona_key
+            update_columns: []
+          }
+        ) {
+          affected_rows
+          returning {
+            id
+            room_id
+            user_id
+            persona_id
+            persona_name
+            persona_hex
+            domain_id
+            domain_name
+            claimed_at
+          }
+        }
+      }`,
+      {
+        roomId: room.id,
+        userId,
+        domainId: body.domain.id,
+        domainName: body.domain.name,
+        domainDescription: body.domain.description ?? null,
+        domainIcon: body.domain.icon ?? null,
+        personaId: body.persona.id,
+        personaName: body.persona.name,
+        personaHex: body.persona.color_code,
+        personaAssetPath: body.persona.asset_path ?? null,
+      }
+    )
+
+    const insertedClaim = claimResult.insert_room_persona_claims.returning[0]
+
+    if (!insertedClaim) {
+      const existing = await hasuraAdminRequest<{
+        room_persona_claims: Array<{
+          user_id: string
+          persona_name: string
+          domain_name: string
+          user?: { name?: string | null }
+        }>
+      }>(
+        `query ExistingPersonaClaim($roomId: uuid!, $personaId: String!) {
+          room_persona_claims(
+            where: {
+              room_id: { _eq: $roomId }
+              persona_id: { _eq: $personaId }
+            }
+            limit: 1
+          ) {
+            user_id
+            persona_name
+            domain_name
+            user {
+              name
+            }
+          }
+        }`,
+        {
+          roomId: room.id,
+          personaId: body.persona.id,
+        }
+      )
+
+      const takenBy = existing.room_persona_claims[0]
+
+      return Response.json(
+        {
+          won: false,
+          error: 'Persona already claimed',
+          takenBy: takenBy?.user?.name || 'Another player',
+        },
+        { status: 409 }
+      )
+    }
+
+    const teamName = `${body.persona.name} — ${body.domain.name}`
+
+    const teamResult = await hasuraAdminRequest<{
+      insert_teams_one: { id: string } | null
+    }>(
+      `mutation CreatePersonaTeam(
+        $name: String!
+        $color: String!
+        $userId: uuid!
+        $roomId: uuid!
+        $domainId: String!
+        $domainName: String!
+        $domainDescription: String
+        $personaId: String!
+        $personaName: String!
+        $personaHex: String!
+      ) {
+        insert_teams_one(
+          object: {
+            name: $name
+            color: $color
+            created_by: $userId
+            leader_id: $userId
+            room_id: $roomId
+            domain_id: $domainId
+            domain_name: $domainName
+            domain_description: $domainDescription
+            persona_id: $personaId
+            persona_name: $personaName
+            persona_hex: $personaHex
+          }
+          on_conflict: {
+            constraint: teams_room_id_persona_id_key
+            update_columns: []
+          }
+        ) {
+          id
+        }
+      }`,
+      {
+        name: teamName,
+        color: body.persona.color_code,
+        userId,
+        roomId: room.id,
+        domainId: body.domain.id,
+        domainName: body.domain.name,
+        domainDescription: body.domain.description ?? '',
+        personaId: body.persona.id,
+        personaName: body.persona.name,
+        personaHex: body.persona.color_code,
+      }
+    )
+
+    if (teamResult.insert_teams_one?.id) {
+      await hasuraAdminRequest(
+        `mutation AddPersonaTeamLeader($teamId: uuid!, $userId: uuid!) {
+          insert_team_members_one(
+            object: {
+              team_id: $teamId
+              user_id: $userId
+              member_type: "LEADER"
+            }
+            on_conflict: {
+              constraint: team_members_pkey
+              update_columns: []
+            }
+          ) {
+            id
+          }
+        }`,
+        {
+          teamId: teamResult.insert_teams_one.id,
+          userId,
+        }
+      )
+    }
+
+    const countData = await hasuraAdminRequest<{
+      room_persona_claims_aggregate: { aggregate: { count: number } }
+    }>(
+      `query CountRoomClaims($roomId: uuid!) {
+        room_persona_claims_aggregate(where: { room_id: { _eq: $roomId } }) {
+          aggregate {
+            count
+          }
+        }
+      }`,
+      { roomId: room.id }
+    )
+
+    const claimCount = countData.room_persona_claims_aggregate.aggregate.count
+    const gameEnded = claimCount >= 20
+
+    const previousState = room.game_state?.state || {}
+
+
+    await hasuraAdminRequest(
+      `mutation SyncPersonaGameState($roomId: uuid!, $state: jsonb!, $status: String!) {
+        insert_game_state_one(
+          object: {
+            room_id: $roomId
+            state: $state
+          }
+          on_conflict: {
+            constraint: game_state_pkey
+            update_columns: [state, updated_at]
+          }
+        ) {
+          room_id
+        }
+
+        update_rooms_by_pk(
+          pk_columns: { id: $roomId }
+          _set: { status: $status }
+        ) {
+          id
+          status
+        }
+      }`,
+      {
+        roomId: room.id,
+        status: 'in_game',
+        state: {
+        ...previousState,
+          personaFlow: {
+            ...(previousState.personaFlow || {}),
+            claimCount,
+            totalPersonas: 20,
+            ended: gameEnded,
+            readyForBidding: gameEnded,
+            lastClaim: insertedClaim,
+          },
+          logs: [
+            `${body.persona.name} claimed by player ${userId.slice(0, 8)} in ${body.domain.name}`,
+            ...(Array.isArray(previousState.logs) ? previousState.logs : []),
+          ].slice(0, 50),
+        },
+      }
+    )
+
+    return Response.json({
+      won: true,
+      gameEnded,
+      claimCount,
+      claim: insertedClaim,
+    })
+  } catch (err: any) {
+    console.error('Persona claim error:', err)
+    return Response.json({ error: err.message || 'Failed to claim persona' }, { status: 500 })
+  }
+}
+
+```
+
+---
+
+### File: `app/api/persona-flow/drop/route.ts`
+
+```typescript
+import { getUserIdFromRequest } from '@/lib/multiplayer/jwt'
+import { hasuraAdminRequest } from '@/lib/hasura'
+
+export async function POST(req: Request) {
+  const userId = getUserIdFromRequest(req)
+
+  if (!userId) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  let teamId: string | undefined
+
+  try {
+    const body = await req.json()
+    teamId = body.teamId
+  } catch {
+    return Response.json({ error: 'Invalid JSON request body' }, { status: 400 })
+  }
+
+  if (!teamId) {
+    return Response.json({ error: 'teamId is required' }, { status: 400 })
+  }
+
+  try {
+    const teamData = await hasuraAdminRequest<{
+      teams_by_pk: {
+        id: string
+        room_id: string | null
+        persona_id: string | null
+        created_by: string | null
+        leader_id: string | null
+      } | null
+    }>(
+      `query GetPersonaTeam($teamId: uuid!) {
+        teams_by_pk(id: $teamId) {
+          id
+          room_id
+          persona_id
+          created_by
+          leader_id
+        }
+      }`,
+      { teamId }
+    )
+
+    const team = teamData.teams_by_pk
+
+    if (!team) {
+      return Response.json({ error: 'Team not found' }, { status: 404 })
+    }
+
+    if (!team.room_id || !team.persona_id) {
+      return Response.json(
+        { error: 'This team is not linked to a Persona Flow claim' },
+        { status: 400 }
+      )
+    }
+
+    const ownsTeam = team.created_by === userId || team.leader_id === userId
+
+    if (!ownsTeam) {
+      return Response.json(
+        { error: 'You can only drop your own persona' },
+        { status: 403 }
+      )
+    }
+
+    await hasuraAdminRequest(
+      `mutation DropPersona(
+        $teamId: uuid!
+        $roomId: uuid!
+        $personaId: String!
+        $userId: uuid!
+      ) {
+        delete_team_members(
+          where: {
+            team_id: { _eq: $teamId }
+          }
+        ) {
+          affected_rows
+        }
+
+        delete_teams_by_pk(id: $teamId) {
+          id
+        }
+
+        delete_room_persona_claims(
+          where: {
+            room_id: { _eq: $roomId }
+            persona_id: { _eq: $personaId }
+            user_id: { _eq: $userId }
+          }
+        ) {
+          affected_rows
+        }
+      }`,
+      {
+        teamId,
+        roomId: team.room_id,
+        personaId: team.persona_id,
+        userId,
+      }
+    )
+
+    return Response.json({
+      success: true,
+      dropped: true,
+    })
+  } catch (err: any) {
+    console.error('Drop persona error:', err)
+    return Response.json(
+      { error: err.message || 'Failed to drop persona' },
+      { status: 500 }
+    )
+  }
+}
+
+```
+
+---
+
 ### File: `app/dashboard/page.tsx`
 
 ```tsx
-// "use client";
-
-// import Link from "next/link";
-// import { usePathname, useRouter } from "next/navigation";
-// import { Gavel, Radio, Gamepad2, MessageCircle, User, Users, Activity, Gem } from "lucide-react";
-// import { gql } from "@apollo/client";
-// import { useQuery } from "@apollo/client/react";
-// import { AnimatedBanner } from "@/components/AnimatedBanner";
-// import { useAuth } from "@/context/token-context";
-// import { useEffect, useState } from "react";
-
-// // 1. Subscription to listen for the live banner config
-// const BANNER_SUBSCRIPTION = gql`
-//     query GetLiveBanner {
-//         banner_by_pk(id: 1) {
-//             data
-//         }
-//     }
-// `;
-
-// export default function DashboardPage() {
-//     const pathname = usePathname();
-//     const router = useRouter();
-//     const auth = useAuth();
-    
-//     // Existing State
-//     const [activeRoomCode, setActiveRoomCode] = useState<string | null>(null);
-    
-//     // NEW Multiplayer Room State
-//     const [joinCode, setJoinCode] = useState('');
-//     const [roomError, setRoomError] = useState('');
-//     const [isRoomLoading, setIsRoomLoading] = useState(false);
-
-//     const bottomNavItems = [
-//         { label: "My Team", href: "/myteam", icon: Users, enabled: true },
-//         { label: "X", href: null, icon: Gem, enabled: false },
-//         { label: "Games", href: "/games", icon: Gamepad2, enabled: true },
-//         { label: "Live Chat", href: "/live", icon: MessageCircle, enabled: true },
-//         { label: "Room", href: activeRoomCode ? `/room/${activeRoomCode}` : "/", icon: Radio, enabled: true },
-//     ];
-
-//     // Auth Protection
-//     useEffect(() => {
-//         if (typeof window !== "undefined" && !auth.getJwt()) {
-//             router.push("/login");
-//         }
-//     }, [auth, router]);
-
-//     // Active Room Tracking
-//     useEffect(() => {
-//         const roomMatch = pathname?.match(/^\/room\/([A-Z0-9]+)/i);
-//         if (roomMatch) {
-//             const code = roomMatch[1].toUpperCase();
-//             setActiveRoomCode(code);
-//             localStorage.setItem('active-room-code', code);
-//         } else {
-//             const saved = localStorage.getItem('active-room-code');
-//             if (saved) {
-//                 setActiveRoomCode(saved);
-//             }
-//         }
-//     }, [pathname]);
-
-//     // Fetch the live data via WebSocket
-//     const { data, loading, error } = useQuery<{ banner_by_pk: { data: any } }>(BANNER_SUBSCRIPTION);
-//     const bannerConfig = data?.banner_by_pk?.data;
-//     console.log("data:", data);
-//     console.log("loading:", loading);
-//     console.log("error:", error);
-//     console.log("banner config:", bannerConfig);
-
-//     // --- MULTIPLAYER LOGIC ---
-
-//     async function createRoom() {
-//         setIsRoomLoading(true)
-//         setRoomError('')
-//         try {
-//             const token = auth.getJwt()
-//             const headers: Record<string, string> = {
-//                 'Content-Type': 'application/json'
-//             }
-//             if (token) {
-//                 headers['Authorization'] = `Bearer ${token}`
-//             }
-
-//             const res = await fetch('/api/multiplayer/create', { 
-//                 method: 'POST',
-//                 headers,
-//                 body: JSON.stringify({ gameId: 'chimp' }) // Default game to chimp
-//             })
-            
-//             const data = await res.json()
-//             if (res.ok && data.room) {
-//                 router.push(`/room/${data.room.code}`)
-//             } else {
-//                 setRoomError(data.error ?? 'Failed to create room')
-//                 setIsRoomLoading(false)
-//             }
-//         } catch (err) {
-//             console.error(err)
-//             setRoomError('A network error occurred while creating the room.')
-//             setIsRoomLoading(false)
-//         }
-//     }
-
-//     async function joinRoom() {
-//         if (!joinCode.trim()) return
-//         setIsRoomLoading(true)
-//         setRoomError('')
-//         try {
-//             const token = auth.getJwt()
-//             const headers: Record<string, string> = {
-//                 'Content-Type': 'application/json'
-//             }
-//             if (token) {
-//                 headers['Authorization'] = `Bearer ${token}`
-//             }
-
-//             const res = await fetch('/api/multiplayer/join', {
-//                 method: 'POST',
-//                 headers,
-//                 body: JSON.stringify({ code: joinCode.trim().toUpperCase() }),
-//             })
-            
-//             const data = await res.json()
-//             if (res.ok && data.code) {
-//                 router.push(`/room/${data.code}`)
-//             } else {
-//                 setRoomError(data.error ?? 'Failed to join room')
-//                 setIsRoomLoading(false)
-//             }
-//         } catch (err) {
-//             console.error(err)
-//             setRoomError('A network error occurred while joining the room.')
-//             setIsRoomLoading(false)
-//         }
-//     }
-
-//     return (
-//         <main className="relative flex min-h-screen flex-col overflow-hidden bg-[#181818] text-white selection:bg-[#ff6a6a] selection:text-[#171717]">
-//             <div className="pointer-events-none fixed inset-0 opacity-25 [background-image:radial-gradient(#5b5b5b_1px,transparent_1px)] [background-size:18px_18px]" />
-
-//             <header className="relative z-20 flex shrink-0 items-center justify-between border-b border-[#2e2e2e] bg-[#181818]/95 px-5 py-4 backdrop-blur-[2px]">
-//                 <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292] sm:text-[12px]">
-//                     UXISM<span className="text-[#5b5b5b]">/</span>UXATHON
-//                 </p>
-
-//                 <Link href="/profile" aria-label="Open profile" className="grid h-10 w-10 place-items-center rounded-[24px] border border-[#5b5b5b] bg-[#181818] text-[#929292] active:border-[rgba(222,247,103,0.5)] active:text-[#DEF767]">
-//                     <User size={18} aria-hidden />
-//                 </Link>
-//             </header>
-
-//             {/* Live Banner Section */}
-//             <section className="relative z-10 flex flex-col items-center justify-center px-5 pt-8 w-full max-w-5xl mx-auto">
-//                 {bannerConfig && bannerConfig.text ? (
-//                     <div className="w-full border border-[#2e2e2e] bg-[#171717]/80 backdrop-blur-sm p-6 sm:p-10 flex flex-col items-center">
-//                         <div
-//                             style={{
-//                                 fontFamily: "var(--font-mono)",
-//                                 fontSize: bannerConfig.subHeaderFontSize ? `${bannerConfig.subHeaderFontSize}px` : "11px",
-//                                 color: "#DEF767",
-//                                 letterSpacing: "0.25em",
-//                                 marginBottom: "16px",
-//                                 fontWeight: "bold",
-//                             }}
-//                         >
-//                             [ {bannerConfig.subHeader || "LIVE BROADCAST"} ]
-//                         </div>
-
-//                         <div className="w-full">
-//                             <AnimatedBanner
-//                                 text={bannerConfig.text}
-//                                 effect={bannerConfig.effect}
-//                                 speed={bannerConfig.speed}
-//                                 blurStrength={bannerConfig.blurStrength}
-//                                 font={bannerConfig.font}
-//                                 fontSize={bannerConfig.mainFontSize}
-//                                 repeat={bannerConfig.repeat}
-//                                 color={bannerConfig.color}
-//                             />
-//                         </div>
-
-//                         <div className="flex flex-wrap justify-center items-center gap-4 sm:gap-8 mt-6 font-mono text-[10px] sm:text-[11px] text-[#929292] uppercase">
-//                             <div className="flex items-center gap-2">
-//                                 <Activity size={12} className="text-[#DEF767]" />
-//                                 {bannerConfig.footer1Label || "STATUS"}: <span className="text-[#DEF767] font-bold">{bannerConfig.footer1Value || "ACTIVE"}</span>
-//                             </div>
-//                             <div className="hidden sm:block">•</div>
-//                             <div>
-//                                 {bannerConfig.footer2Label || "NODE"}: <span className="text-[#DEF767] font-bold">{bannerConfig.footer2Value || "SYNCED"}</span>
-//                             </div>
-//                         </div>
-//                     </div>
-//                 ) : (
-//                     <p className="max-w-[22ch] text-center font-mono text-[11px] uppercase leading-[1.6] tracking-[0.14em] text-[#5b5b5b] sm:text-[12px]">{loading ? "SYNCING TELEMETRY..." : "UXATHON'26"}</p>
-//                 )}
-//             </section>
-
-//             {/* Multiplayer Room Section (Host & Join) */}
-//             <section className="relative z-10 flex flex-col md:flex-row gap-6 px-5 pb-28 pt-6 w-full max-w-5xl mx-auto">
-                
-//                 {/* Host Session block */}
-//                 <div className="flex-1 border border-[#2e2e2e] bg-[#171717]/70 p-5 text-center flex flex-col justify-between">
-//                     <div>
-//                         <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#5b5b5b] mb-2">SIGNAL TRANSMITTER</p>
-//                         <h3 className="font-sans text-lg uppercase tracking-[0.04em] text-white mb-2">Host New Session</h3>
-//                         <p className="text-[12px] text-[#929292] mb-6 leading-5 max-w-[28ch] mx-auto">
-//                             Initialize a sandbox room channel and invite peers via signal key.
-//                         </p>
-//                     </div>
-//                     <button
-//                         id="btn-create-room"
-//                         onClick={createRoom}
-//                         disabled={isRoomLoading}
-//                         className="w-full border border-[rgba(222,247,103,0.5)] bg-[#181818] font-mono text-[11px] uppercase tracking-[0.14em] text-[#DEF767] py-3.5 active:border-[#ff6a6a] active:bg-[#ff6a6a] active:text-[#171717] disabled:opacity-30 disabled:cursor-not-allowed transition-all mt-auto"
-//                     >
-//                         {isRoomLoading ? 'Initializing Stream...' : 'Deploy Room Channel'}
-//                     </button>
-//                 </div>
-
-//                 {/* Join Session block */}
-//                 <div className="flex-1 border border-[#2e2e2e] bg-[#171717]/70 p-5 text-center flex flex-col justify-between">
-//                     <div>
-//                         <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#5b5b5b] mb-2">SIGNAL RECEIVER</p>
-//                         <h3 className="font-sans text-lg uppercase tracking-[0.04em] text-white mb-2">Sync Existing Room</h3>
-//                         <p className="text-[12px] text-[#929292] mb-6 leading-5 max-w-[28ch] mx-auto">
-//                             Enter the 6-character room coordinate key to connect.
-//                         </p>
-//                     </div>
-
-//                     <div className="space-y-4 mt-auto">
-//                         <input
-//                             id="input-room-code"
-//                             type="text"
-//                             value={joinCode}
-//                             onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-//                             placeholder="ROOM CODE"
-//                             maxLength={6}
-//                             disabled={isRoomLoading}
-//                             className="w-full border border-[#2e2e2e] bg-[#181818] px-4 py-3 font-mono text-lg text-center text-white placeholder-[#5b5b5b] focus:outline-none focus:border-[#DEF767] transition-colors uppercase tracking-[0.2em] font-bold"
-//                         />
-
-//                         <button
-//                             id="btn-join-room"
-//                             onClick={joinRoom}
-//                             disabled={isRoomLoading || joinCode.trim().length !== 6}
-//                             className="w-full border border-[rgba(222,247,103,0.5)] bg-[#181818] font-mono text-[11px] uppercase tracking-[0.14em] text-[#DEF767] py-3.5 active:border-[#ff6a6a] active:bg-[#ff6a6a] active:text-[#171717] disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-//                         >
-//                             {isRoomLoading ? 'Connecting Channel...' : 'Sync Session'}
-//                         </button>
-
-//                         {roomError && (
-//                             <div className="border border-[#ff6a6a]/30 bg-[#ff6a6a]/5 text-[#ff6a6a] font-mono text-[10px] uppercase tracking-[0.1em] py-2 px-3">
-//                                 Error: {roomError}
-//                             </div>
-//                         )}
-//                     </div>
-//                 </div>
-
-//             </section>
-
-//             <nav aria-label="Dashboard navigation" className="fixed bottom-0 left-0 right-0 z-20 border-t border-[#2e2e2e] bg-[#181818]/95 backdrop-blur-[2px] pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-//                 <ul className="grid grid-cols-5" style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
-//                     {bottomNavItems.map((item) => {
-//                         const Icon = item.icon;
-//                         const isActive = 
-//                             item.href && 
-//                             (pathname === item.href || 
-//                              (item.label === "Room" && pathname?.startsWith("/room/")));
-
-//                         if (!item.enabled) {
-//                             return (
-//                                 <li key={item.label} className="border-r border-[#2e2e2e] last:border-r-0 -mr-[1px]">
-//                                     <span className="flex flex-col items-center justify-center gap-1 h-[64px] text-[#5b5b5b] cursor-not-allowed" aria-disabled="true">
-//                                         <Icon size={16} aria-hidden />
-//                                         <span className="font-mono text-[8px] uppercase tracking-[0.12em] sm:text-[9px]">{item.label}</span>
-//                                     </span>
-//                                 </li>
-//                             );
-//                         }
-
-//                         return (
-//                             <li key={item.label} className="border-r border-[#2e2e2e] last:border-r-0 -mr-[1px]">
-//                                 <Link
-//                                     href={item.href!}
-//                                     className={`flex flex-col items-center justify-center gap-1 h-[64px] transition-colors ${
-//                                         isActive
-//                                             ? "bg-[#ff6a6a] text-[#171717]"
-//                                             : "text-[#929292] hover:text-white active:bg-[#DEF767] active:text-[#171717]"
-//                                     }`}
-//                                     aria-current={isActive ? "page" : undefined}
-//                                 >
-//                                     <Icon
-//                                         size={16}
-//                                         aria-hidden
-//                                         className="transition-transform duration-200"
-//                                         style={{ transform: isActive ? "rotate(45deg)" : "none" }}
-//                                     />
-//                                     <span className="font-mono text-[8px] uppercase tracking-[0.12em] sm:text-[9px]">{item.label}</span>
-//                                 </Link>
-//                             </li>
-//                         );
-//                     })}
-//                 </ul>
-//             </nav>
-//         </main>
-//     );
-// }
-
-
-
-
-
-
 "use client";
 
 import Link from "next/link";
@@ -885,7 +2793,7 @@ const BANNER_SUBSCRIPTION = gql`
 export default function DashboardPage() {
     const router = useRouter();
     const auth = useAuth();
-    
+
     const [joinCode, setJoinCode] = useState('');
     const [roomError, setRoomError] = useState('');
     const [isRoomLoading, setIsRoomLoading] = useState(false);
@@ -908,19 +2816,19 @@ export default function DashboardPage() {
             const headers: Record<string, string> = { 'Content-Type': 'application/json' };
             if (token) headers['Authorization'] = `Bearer ${token}`;
 
-            const res = await fetch('/api/multiplayer/create', { 
+            const res = await fetch('/api/multiplayer/create', {
                 method: 'POST',
                 headers,
-                body: JSON.stringify({ gameId: 'chimp' }) 
+                body: JSON.stringify({ gameId: 'persona-flow' })
             });
-            
+
             const data = await res.json();
-            console.log("data",data)
+            console.log("data", data)
             console.log(
-            token,
-            //host_user_id,
-            //game_id,
-            //code
+                token,
+                //host_user_id,
+                //game_id,
+                //code
             )
             if (res.ok && data.room) {
                 localStorage.setItem('active-room-code', data.room.code);
@@ -950,7 +2858,7 @@ export default function DashboardPage() {
                 body: JSON.stringify({ code: joinCode.trim().toUpperCase() }),
             });
             console.log("res", res)
-            
+
             const data = await res.json();
             console.log("data", data)
             if (res.ok && data.code) {
@@ -1017,10 +2925,10 @@ export default function DashboardPage() {
 
             {/* Footer Navigation bar layout definitions */}
             <nav className="fixed bottom-0 left-0 right-0 z-20 border-t border-[#2e2e2e] bg-[#181818]/95 h-16 flex items-center justify-around font-mono text-[10px]">
-                <button onClick={() => router.push("/myteam")} className="flex flex-col items-center text-[#FFFFFF]"> <Users size={16}/> TEAM </button>
-                <Link href="/games" className="flex flex-col items-center text-[#FFFFFF]"><Gamepad2 size={16}/>GAMES LOUNGE</Link>
-                <Link href="/live" className="flex flex-col items-center text-[#FFFFFF]"><MessageCircle size={16}/>LIVE STREAM</Link>
-                <Link href="/x" className="flex flex-col items-center text-[#FFFFFF]"><MessageCircle size={16}/>X</Link>
+                <button onClick={() => router.push("/myteam")} className="flex flex-col items-center text-[#FFFFFF]"> <Users size={16} /> TEAM </button>
+                <Link href="/x" className="flex flex-col items-center text-[#FFFFFF]"><Gem size={16} />X</Link>
+                <Link href="/games" className="flex flex-col items-center text-[#FFFFFF]"><Gamepad2 size={16} />GAMES LOUNGE</Link>
+                <Link href="/live" className="flex flex-col items-center text-[#FFFFFF]"><MessageCircle size={16} />LIVE STREAM</Link>
             </nav>
         </main>
     );
@@ -1051,9 +2959,10 @@ type GameShellProps = {
   title: string;
   description: string;
   children: React.ReactNode;
+  variant?: "default" | "wide" | "stage";
 };
 
-export function GameShell({ meta, title, description, children }: GameShellProps) {
+export function GameShell({ meta, title, description, children, variant = "default", }: GameShellProps) {
   const pathname = usePathname();
 
   const [activeRoomCode, setActiveRoomCode] = useState<string | null>(null);
@@ -1072,11 +2981,18 @@ export function GameShell({ meta, title, description, children }: GameShellProps
     }
   }, [pathname]);
 
+  const shellWidthClass =
+  variant === "stage"
+    ? "max-w-[1800px] px-3 sm:px-6 lg:px-10 xl:px-14"
+    : variant === "wide"
+      ? "max-w-7xl px-4 sm:px-6 lg:px-8"
+      : "max-w-lg px-5";
+
   return (
     <main className="relative flex min-h-screen flex-col overflow-hidden bg-[#181818] text-white selection:bg-[#ff6a6a] selection:text-[#171717]">
       <PageDecor />
 
-      <section className="relative z-10 mx-auto flex w-full max-w-lg flex-1 flex-col px-5 pb-28 pt-6">
+      <section className="relative z-10 mx-auto flex w-full max-w-lg flex-1 flex-col px-5 pb-28 pt-6 ${shellWidthClass}">
         <Link
           href="/games"
           className="mb-6 inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292] active:text-[#DEF767]"
@@ -1144,6 +3060,1188 @@ function PageDecor() {
       <div className="pointer-events-none fixed bottom-24 right-4 z-0 h-5 w-5 border-b border-r border-[#5b5b5b]" />
       <div className="pointer-events-none fixed left-1/2 top-[-120px] h-[280px] w-[280px] -translate-x-1/2 rounded-full bg-[radial-gradient(circle_at_30%_30%,#46B1FF,transparent_35%),radial-gradient(circle_at_70%_40%,#A259FF,transparent_35%),radial-gradient(circle_at_50%_70%,#ff6a6a,transparent_38%),radial-gradient(circle_at_80%_80%,#DEF767,transparent_30%)] opacity-20 blur-3xl" />
     </>
+  );
+}
+
+```
+
+---
+
+### File: `app/games/bidding/config.tsx`
+
+```tsx
+import { lazy } from "react";
+import { registerGame } from "../registry";
+
+export const biddingConfig = {
+  id: "bidding",
+  name: "Bidding",
+  description: "Strategic bidding mode. Coming soon.",
+  category: "strategy" as const,
+  scoring: { strategy: "highest" as const, unit: "points" },
+  realtime: true,
+  leaderboard: true,
+  rounds: 1,
+  component: lazy(() => import("./page")),
+};
+
+export function initBidding() {
+  registerGame(biddingConfig);
+}
+
+```
+
+---
+
+### File: `app/games/bidding/page.tsx`
+
+```tsx
+// "use client";
+
+// import { GameShell, GamePanel } from "../_components/GameShell";
+
+// export default function BiddingPage() {
+//   return (
+//     <GameShell
+//       meta="UXATHON / MAIN GAME / BIDDING"
+//       title="Bidding"
+//       description="This main game mode is reserved for the bidding flow."
+//     >
+//       <GamePanel className="text-center">
+//         <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292]">
+//           Bidding module placeholder. Build logic here next.
+//         </p>
+//       </GamePanel>
+//     </GameShell>
+//   );
+// }
+
+
+
+
+
+"use client";
+
+import React, { useMemo, useState } from "react";
+import {
+  Gavel,
+  Trophy,
+  Users,
+  Radio,
+  Coins,
+  UserRound,
+  Sparkles,
+  Joystick,
+  Zap,
+  Crown,
+} from "lucide-react";
+import { GamePanel, GameShell } from "../_components/GameShell";
+
+type BiddingPageProps = {
+  isMultiplayer?: boolean;
+  roomId?: string;
+  roomCode?: string;
+  gameState?: any;
+  updateGameState?: (state: any) => Promise<void>;
+  players?: any[];
+  userId?: string | null;
+  isHost?: boolean;
+};
+
+type ApiAction = "start" | "draw" | "bid" | "close";
+
+function formatTokens(value: number | string | null | undefined) {
+  const numberValue = Number(value || 0);
+  return numberValue.toLocaleString("en-IN");
+}
+
+function getJwt() {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem("jwt-token");
+}
+
+async function callBiddingApi(action: ApiAction, body: Record<string, any>) {
+  const token = getJwt();
+
+  const res = await fetch(`/api/bidding/${action}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = await res.json().catch(() => ({}));
+
+  if (!res.ok) {
+    throw new Error(data.error || `Failed to run bidding action: ${action}`);
+  }
+
+  return data;
+}
+
+export default function BiddingPage(props: BiddingPageProps) {
+  const {
+    isMultiplayer = false,
+    roomCode,
+    gameState,
+    players = [],
+    userId,
+    isHost = false,
+  } = props;
+
+  const bidding = gameState?.bidding;
+
+  const myLeader = userId && bidding?.leaders ? bidding.leaders[userId] : null;
+  const isLeader = !!myLeader;
+  const currentNominee = bidding?.currentNominee;
+  const currentBid = bidding?.currentBid;
+
+  const [startingTokens, setStartingTokens] = useState(1_000_000);
+  const [minIncrement, setMinIncrement] = useState(50_000);
+  const [bidAmount, setBidAmount] = useState("");
+  const [isBusy, setIsBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const soldToMe = useMemo(() => {
+    if (!userId || !Array.isArray(bidding?.sold)) return null;
+
+    return bidding.sold.find((record: any) => record.userId === userId) || null;
+  }, [bidding?.sold, userId]);
+
+  const amCurrentNominee = currentNominee?.userId === userId;
+
+  const leadersList = useMemo(() => {
+    if (!bidding?.leaders) return [];
+    return Object.values(bidding.leaders) as any[];
+  }, [bidding?.leaders]);
+
+  const entries = Array.isArray(bidding?.entries) ? bidding.entries : [];
+  const sold = Array.isArray(bidding?.sold) ? bidding.sold : [];
+  const logs = Array.isArray(bidding?.logs) ? bidding.logs : [];
+
+  const currentRequiredBid = Number(currentBid?.amount || 0) + Number(bidding?.minIncrement || minIncrement);
+
+  async function runAction(action: ApiAction, body: Record<string, any>) {
+    if (!roomCode) {
+      setError("Room code missing. Open bidding from an active room.");
+      return;
+    }
+
+    setIsBusy(true);
+    setError(null);
+
+    try {
+      await callBiddingApi(action, {
+        code: roomCode,
+        ...body,
+      });
+    } catch (err: any) {
+      setError(err.message || "Bidding action failed.");
+      return null;
+    } finally {
+      setIsBusy(false);
+    }
+  }
+
+  async function startBidding() {
+    await runAction("start", {
+      startingTokens,
+      minIncrement,
+    });
+  }
+
+  async function drawMember() {
+    return await runAction("draw", {});
+  }
+
+  async function placeBid(amount?: number) {
+    const finalAmount = Number(amount ?? bidAmount);
+
+    if (!Number.isFinite(finalAmount) || finalAmount <= 0) {
+      setError("Enter a valid bid amount.");
+      return;
+    }
+
+    await runAction("bid", {
+      amount: finalAmount,
+    });
+
+    setBidAmount("");
+  }
+
+  async function closeBid() {
+    return await runAction("close", {});
+  }
+
+  if (!isMultiplayer) {
+    return (
+      <GameShell
+        meta="UXATHON / MAIN GAME / BIDDING"
+        title="Bidding"
+        description="This game is designed for multiplayer room sessions."
+      >
+        <GamePanel className="text-center space-y-4">
+          <Gavel className="mx-auto text-[#DEF767]" size={32} />
+          <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292]">
+            Open this game from an active room after Persona Flow.
+          </p>
+        </GamePanel>
+      </GameShell>
+    );
+  }
+
+  return (
+    <div className={`space-y-5 ${isHost ? "w-full" : ""}`}>
+    <section className="mx-auto w-full max-w-[1600px] border border-[#2e2e2e] bg-[#171717]/70 p-4 sm:p-5 lg:p-6">        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#5b5b5b]">
+              UXATHON / BIDDING / ROOM {roomCode || "UNKNOWN"}
+            </p>
+            <h2 className="mt-2 font-sans text-2xl uppercase tracking-[0.04em] text-white">
+              Bidding Arena
+            </h2>
+            <p className="mt-2 text-[12px] leading-5 text-[#929292]">
+              Leaders bid tokens on available members. Winning bids assign members into the leader&apos;s team.
+            </p>
+          </div>
+
+          <div className="shrink-0 border border-[#2e2e2e] px-3 py-2 text-right">
+            <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b]">Phase</p>
+            <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.14em] text-[#DEF767]">
+              {bidding?.phase || "not started"}
+            </p>
+          </div>
+        </div>
+
+        {error && (
+          <div className="mt-4 border border-[#ff6a6a]/40 bg-[#ff6a6a]/10 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[#ff6a6a]">
+            {error}
+          </div>
+        )}
+      </section>
+
+      {!bidding ? (
+        <NotStartedPanel
+          isHost={isHost}
+          startingTokens={startingTokens}
+          setStartingTokens={setStartingTokens}
+          minIncrement={minIncrement}
+          setMinIncrement={setMinIncrement}
+          isBusy={isBusy}
+          onStart={startBidding}
+          playerCount={players.length}
+        />
+      ) : (
+        <>
+          {isHost ? (
+          <HostJackpotStage
+            bidding={bidding}
+            currentNominee={currentNominee}
+            currentBid={currentBid}
+            entries={entries}
+            isBusy={isBusy}
+            onDraw={drawMember}
+            onClose={closeBid}
+          />
+        ) : (
+          <CurrentAuctionPanel
+            currentNominee={currentNominee}
+            currentBid={currentBid}
+            bidding={bidding}
+            amCurrentNominee={amCurrentNominee}
+            soldToMe={soldToMe}
+          />
+        )}
+
+        {isHost ? null : isLeader ? (
+            <LeaderControls
+              myLeader={myLeader}
+              currentBid={currentBid}
+              currentNominee={currentNominee}
+              bidAmount={bidAmount}
+              setBidAmount={setBidAmount}
+              currentRequiredBid={currentRequiredBid}
+              isBusy={isBusy}
+              onPlaceBid={placeBid}
+            />
+          ) : (
+            <SpectatorPanel
+              amCurrentNominee={amCurrentNominee}
+              soldToMe={soldToMe}
+              currentNominee={currentNominee}
+            />
+          )}
+
+          <LeaderBoard leaders={leadersList} currentLeaderId={currentBid?.leaderUserId} />
+
+          <BiddingStats entries={entries} sold={sold} />
+
+          <BidLogs logs={logs} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function NotStartedPanel({
+  isHost,
+  startingTokens,
+  setStartingTokens,
+  minIncrement,
+  setMinIncrement,
+  isBusy,
+  onStart,
+  playerCount,
+}: {
+  isHost: boolean;
+  startingTokens: number;
+  setStartingTokens: (value: number) => void;
+  minIncrement: number;
+  setMinIncrement: (value: number) => void;
+  isBusy: boolean;
+  onStart: () => void;
+  playerCount: number;
+}) {
+  return (
+    <GamePanel className="space-y-5">
+      <div className="text-center">
+        <Sparkles className="mx-auto text-[#DEF767]" size={30} />
+        <h3 className="mt-3 font-sans text-xl uppercase tracking-[0.04em]">Bidding Not Initialized</h3>
+        <p className="mt-2 text-[12px] leading-5 text-[#929292]">
+          {isHost
+            ? "Initialize wallets and build the auction pool from non-leader room members."
+            : "Waiting for the host to initialize the bidding session."}
+        </p>
+      </div>
+
+      {isHost && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label className="block border border-[#2e2e2e] bg-[#181818] p-3">
+              <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+                Starting Tokens
+              </span>
+              <input
+                type="number"
+                value={startingTokens}
+                onChange={(event) => setStartingTokens(Number(event.target.value))}
+                className="mt-2 w-full bg-transparent font-mono text-sm text-white outline-none"
+              />
+            </label>
+
+            <label className="block border border-[#2e2e2e] bg-[#181818] p-3">
+              <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+                Min Increment
+              </span>
+              <input
+                type="number"
+                value={minIncrement}
+                onChange={(event) => setMinIncrement(Number(event.target.value))}
+                className="mt-2 w-full bg-transparent font-mono text-sm text-white outline-none"
+              />
+            </label>
+          </div>
+
+          <button
+            type="button"
+            disabled={isBusy}
+            onClick={onStart}
+            className="w-full border border-[rgba(222,247,103,0.5)] bg-[#181818] py-3.5 font-mono text-[11px] uppercase tracking-[0.14em] text-[#DEF767] disabled:opacity-50"
+          >
+            {isBusy ? "Initializing..." : `Initialize Bidding for ${playerCount} Room Players`}
+          </button>
+        </div>
+      )}
+    </GamePanel>
+  );
+}
+
+function CurrentAuctionPanel({
+  currentNominee,
+  currentBid,
+  bidding,
+  amCurrentNominee,
+  soldToMe,
+}: {
+  currentNominee: any;
+  currentBid: any;
+  bidding: any;
+  amCurrentNominee: boolean;
+  soldToMe: any;
+}) {
+  return (
+    <section className="border border-[#2e2e2e] bg-[#171717]/70 p-4">
+      {amCurrentNominee && (
+        <div className="mb-4 border border-[#DEF767]/40 bg-[#DEF767]/10 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[#DEF767]">
+          Your name has been drawn. Leaders are bidding for you now.
+        </div>
+      )}
+
+      {soldToMe && (
+        <div className="mb-4 border border-[#DEF767]/40 bg-[#DEF767]/10 px-3 py-2">
+          <p className="font-mono text-[10px] uppercase tracking-[0.12em] text-[#DEF767]">
+            You are now part of {soldToMe.teamName}
+          </p>
+          <p className="mt-1 text-[12px] text-[#929292]">
+            Your leader is {soldToMe.leaderName}. Coordinate and regroup with your team.
+          </p>
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        <Radio size={15} className="text-[#ff6a6a]" />
+        <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#5b5b5b]">
+          Current Auction
+        </p>
+      </div>
+
+      {currentNominee ? (
+        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1.2fr_0.8fr]">
+          <div className="border border-[#2e2e2e] bg-[#181818] p-4">
+            <div className="flex items-center gap-4">
+              {currentNominee.profilePicture ? (
+                <img
+                  src={currentNominee.profilePicture}
+                  alt={currentNominee.name}
+                  className="h-16 w-16 rounded-full border border-[#2e2e2e] object-cover"
+                />
+              ) : (
+                <div className="grid h-16 w-16 place-items-center rounded-full border border-[#2e2e2e] text-[#5b5b5b]">
+                  <UserRound size={28} />
+                </div>
+              )}
+
+              <div>
+                <h3 className="font-sans text-2xl uppercase tracking-[0.04em] text-white">
+                  {currentNominee.name}
+                </h3>
+                <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+                  {currentNominee.affiliation || "Affiliation pending"}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b]">Skills</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {Array.isArray(currentNominee.skills) && currentNominee.skills.length > 0 ? (
+                  currentNominee.skills.map((skill: string) => (
+                    <span
+                      key={skill}
+                      className="border border-[#2e2e2e] px-2 py-1 font-mono text-[9px] uppercase tracking-[0.1em] text-[#929292]"
+                    >
+                      {skill}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-[12px] text-[#5b5b5b]">No skills attached yet.</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="border border-[#2e2e2e] bg-[#181818] p-4">
+            <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+              Current Highest Bid
+            </p>
+            <p className="mt-2 font-sans text-3xl uppercase tracking-[0.04em] text-[#DEF767]">
+              {formatTokens(currentBid?.amount)}
+            </p>
+            <p className="mt-2 text-[12px] text-[#929292]">
+              {currentBid?.leaderName
+                ? `Highest bidder: ${currentBid.leaderName}`
+                : "No bids yet."}
+            </p>
+            <p className="mt-4 font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+              Minimum next bid
+            </p>
+            <p className="mt-1 font-mono text-[12px] text-white">
+              {formatTokens(Number(currentBid?.amount || 0) + Number(bidding?.minIncrement || 0))}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-4 border border-dashed border-[#2e2e2e] bg-[#181818]/60 p-6 text-center">
+          <Gavel className="mx-auto text-[#5b5b5b]" size={30} />
+          <p className="mt-3 font-mono text-[10px] uppercase tracking-[0.14em] text-[#929292]">
+            Waiting for host to draw the next member.
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+
+function HostJackpotStage({
+  bidding,
+  currentNominee,
+  currentBid,
+  entries,
+  isBusy,
+  onDraw,
+  onClose,
+}: {
+  bidding: any;
+  currentNominee: any;
+  currentBid: any;
+  entries: any[];
+  isBusy: boolean;
+  onDraw: () => Promise<any>;
+  onClose: () => Promise<any>;
+}) {
+  const [isRolling, setIsRolling] = useState(false);
+  const [leverPulled, setLeverPulled] = useState(false);
+  const [previewName, setPreviewName] = useState<string | null>(null);
+
+  const hasActiveAuction = bidding?.phase === "auction" && bidding?.currentNominee;
+
+  const hasValidBid =
+    Number(bidding?.currentBid?.amount || 0) > 0 &&
+    !!bidding?.currentBid?.leaderUserId &&
+    (!!bidding?.currentBid?.teamId ||
+      !!bidding?.leaders?.[bidding?.currentBid?.leaderUserId]?.teamId);
+
+  const availableEntries = useMemo(() => {
+    return entries.filter((entry: any) => !entry.sold);
+  }, [entries]);
+
+  const reelNames = useMemo(() => {
+    const names = availableEntries.map((entry: any) => entry.name || "Unnamed Member");
+
+    if (names.length === 0) {
+      return ["NO", "MEMBERS", "LEFT"];
+    }
+
+    while (names.length < 12) {
+      names.push(...names);
+    }
+
+    return names.slice(0, 18);
+  }, [availableEntries]);
+
+  async function pullLever() {
+    if (isBusy || isRolling || hasActiveAuction || bidding?.phase === "finished") return;
+
+    setLeverPulled(true);
+    setIsRolling(true);
+    setPreviewName(null);
+
+    const spinDuration = 2200;
+
+    const previewTimer = window.setInterval(() => {
+      const randomEntry = availableEntries[Math.floor(Math.random() * availableEntries.length)];
+      setPreviewName(randomEntry?.name || "Searching...");
+    }, 120);
+
+    window.setTimeout(async () => {
+      window.clearInterval(previewTimer);
+
+      const result = await onDraw();
+      const nominee = result?.nominee;
+
+      if (nominee?.name) {
+        setPreviewName(nominee.name);
+      }
+
+      setIsRolling(false);
+
+      window.setTimeout(() => {
+        setLeverPulled(false);
+      }, 450);
+    }, spinDuration);
+  }
+
+  const displayedNominee = currentNominee || (previewName ? { name: previewName } : null);
+
+  return (
+      <section className="relative mx-auto min-h-[calc(100vh-280px)] w-full max-w-[1600px] overflow-hidden border border-[#2e2e2e] bg-[#080808] p-3 sm:p-5 lg:p-6 xl:p-8">      <style jsx global>{`
+        @keyframes jackpot-reel-roll {
+          0% {
+            transform: translateY(0);
+          }
+          100% {
+            transform: translateY(-50%);
+          }
+        }
+
+        @keyframes jackpot-glow-pulse {
+          0%,
+          100% {
+            opacity: 0.45;
+            transform: scale(1);
+          }
+          50% {
+            opacity: 0.9;
+            transform: scale(1.04);
+          }
+        }
+
+        @keyframes jackpot-marquee {
+          0% {
+            transform: translateX(0);
+          }
+          100% {
+            transform: translateX(-50%);
+          }
+        }
+      `}</style>
+
+      <div className="pointer-events-none absolute inset-0 opacity-30 [background-image:linear-gradient(rgba(255,255,255,0.04)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.04)_1px,transparent_1px)] [background-size:28px_28px]" />
+      <div className="pointer-events-none absolute left-1/2 top-[-160px] h-[420px] w-[420px] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,#DEF767,transparent_62%)] opacity-20 blur-3xl" />
+      <div className="pointer-events-none absolute bottom-[-180px] right-[-120px] h-[360px] w-[360px] rounded-full bg-[radial-gradient(circle,#ff6a6a,transparent_60%)] opacity-20 blur-3xl" />
+
+      <div className="relative z-10">
+        <div className="mb-6 flex flex-col gap-3 border border-[#2e2e2e] bg-[#111]/90 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-[#DEF767]">
+              Host Broadcast Machine
+            </p>
+            <h2 className="mt-1 font-sans text-2xl uppercase tracking-[0.04em] text-white sm:text-4xl">
+              Member Jackpot Draw
+            </h2>
+          </div>
+
+          <div className="grid grid-cols-3 gap-px border border-[#2e2e2e] bg-[#2e2e2e] text-center">
+            <div className="bg-[#181818] px-4 py-2">
+              <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b]">Pool</p>
+              <p className="font-sans text-xl text-white">{entries.length}</p>
+            </div>
+            <div className="bg-[#181818] px-4 py-2">
+              <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b]">Left</p>
+              <p className="font-sans text-xl text-[#DEF767]">{availableEntries.length}</p>
+            </div>
+            <div className="bg-[#181818] px-4 py-2">
+              <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b]">Phase</p>
+              <p className="font-mono text-[11px] uppercase text-white">{bidding?.phase}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 lg:gap-6 xl:grid-cols-[minmax(0,1fr)_180px] 2xl:grid-cols-[minmax(0,1fr)_220px]">
+          <div className="relative min-h-[560px] border border-[#3a3a3a] bg-[#141414] p-4 shadow-[0_0_80px_rgba(222,247,103,0.08)] sm:p-6 lg:min-h-[640px] xl:min-h-[720px] 2xl:min-h-[780px]">            <div className="absolute inset-x-6 top-4 flex justify-between">
+              {Array.from({ length: 9 }).map((_, index) => (
+                <span
+                  key={index}
+                  className={`h-3 w-3 rounded-full border border-[#2e2e2e] ${
+                    isRolling || currentNominee
+                      ? "bg-[#DEF767] shadow-[0_0_18px_rgba(222,247,103,0.8)]"
+                      : "bg-[#2e2e2e]"
+                  }`}
+                />
+              ))}
+            </div>
+
+            <div className="mt-8 rounded-[28px] border border-[#2e2e2e] bg-[#090909] p-4 sm:p-6">
+              <div className="mb-4 overflow-hidden border border-[#2e2e2e] bg-[#050505] py-2">
+                <div
+                  className="flex w-max gap-8 font-mono text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b]"
+                  style={{
+                    animation: "jackpot-marquee 16s linear infinite",
+                  }}
+                >
+                  <span>UXATHON AUCTION LIVE</span>
+                  <span>PERSONA FLOW COMPLETE</span>
+                  <span>TEAM DRAFT ACTIVE</span>
+                  <span>UXATHON AUCTION LIVE</span>
+                  <span>PERSONA FLOW COMPLETE</span>
+                  <span>TEAM DRAFT ACTIVE</span>
+                </div>
+              </div>
+
+              <div className="grid gap-3 sm:gap-4 lg:grid-cols-3">
+                {[0, 1, 2].map((reel) => (
+                  <div
+                    key={reel}
+                    className="relative h-40 overflow-hidden border border-[#2e2e2e] bg-[#111] sm:h-56 lg:h-[320px] xl:h-[380px] 2xl:h-[430px]"
+                    >
+                    <div className="pointer-events-none absolute inset-x-0 top-1/2 z-10 h-16 -translate-y-1/2 border-y border-[#DEF767]/40 bg-[#DEF767]/5 shadow-[0_0_30px_rgba(222,247,103,0.12)]" />
+
+                    <div
+                      className="space-y-3 py-3"
+                      style={{
+                        animation: isRolling
+                          ? `jackpot-reel-roll ${0.42 + reel * 0.08}s linear infinite`
+                          : undefined,
+                      }}
+                    >
+                      {[...reelNames, ...reelNames].map((name, index) => (
+                        <div
+                          key={`${reel}-${name}-${index}`}
+                          className="mx-2 flex h-12 items-center justify-center border border-[#2e2e2e] bg-[#181818] px-2 text-center font-sans text-sm uppercase tracking-[0.06em] text-white sm:mx-3 sm:h-14 sm:text-lg lg:h-20 lg:text-2xl xl:h-24 xl:text-3xl"
+                        >
+                          {name}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-6 border border-[#2e2e2e] bg-[#111] p-5 text-center">
+                <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-[#5b5b5b]">
+                  {isRolling ? "Rolling..." : currentNominee ? "Selected Member" : "Ready to Draw"}
+                </p>
+
+                <h3
+                  className={`mt-3 font-sans text-4xl uppercase leading-none tracking-[0.04em] sm:text-6xl lg:text-7xl xl:text-8xl 2xl:text-9xl ${
+                    currentNominee ? "text-[#DEF767]" : "text-white"
+                  }`}
+                  style={{
+                    animation: isRolling ? "jackpot-glow-pulse 0.8s ease-in-out infinite" : undefined,
+                  }}
+                >
+                  {displayedNominee?.name || "Pull Lever"}
+                </h3>
+
+                {currentNominee && (
+                  <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                    <div className="border border-[#2e2e2e] bg-[#181818] p-4">
+                      <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+                        Highest Bid
+                      </p>
+                      <p className="mt-1 font-sans text-3xl text-[#DEF767]">
+                        {formatTokens(currentBid?.amount)}
+                      </p>
+                      <p className="mt-2 text-[12px] text-[#929292]">
+                        {currentBid?.leaderName
+                          ? `By ${currentBid.leaderName}`
+                          : "No bids placed yet."}
+                      </p>
+                    </div>
+
+                    <div className="border border-[#2e2e2e] bg-[#181818] p-4">
+                      <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+                        Next Minimum
+                      </p>
+                      <p className="mt-1 font-sans text-3xl text-white">
+                        {formatTokens(
+                          Number(currentBid?.amount || 0) + Number(bidding?.minIncrement || 0)
+                        )}
+                      </p>
+                      <p className="mt-2 text-[12px] text-[#929292]">
+                        Waiting for leaders to bid.
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {bidding?.phase === "finished" && (
+              <div className="mt-5 border border-[#DEF767]/40 bg-[#DEF767]/10 px-4 py-3 text-center font-mono text-[11px] uppercase tracking-[0.14em] text-[#DEF767]">
+                Auction finished. All members have been assigned.
+              </div>
+            )}
+          </div>
+
+          <div className="flex min-h-[260px] flex-col items-center justify-center border border-[#2e2e2e] bg-[#101010] p-4 sm:min-h-[320px] xl:min-h-[560px] 2xl:min-h-[640px]">
+            <div className="mb-5 text-center">
+              <Joystick className="mx-auto text-[#DEF767]" size={34} />
+              <p className="mt-3 font-mono text-[10px] uppercase tracking-[0.18em] text-[#5b5b5b]">
+                Draw Lever
+              </p>
+            </div>
+
+            <button
+              type="button"
+              disabled={isBusy || isRolling || hasActiveAuction || bidding?.phase === "finished"}
+              onClick={pullLever}
+              className="relative h-48 w-20 disabled:opacity-40 sm:h-60 sm:w-24 xl:h-80 xl:w-28"
+              aria-label="Pull jackpot lever to draw next member"
+            >
+              <span className="absolute left-1/2 top-0 h-full w-5 -translate-x-1/2 rounded-full border border-[#2e2e2e] bg-[#181818]" />
+
+              <span
+                className={`absolute left-1/2 grid h-16 w-16 -translate-x-1/2 place-items-center rounded-full border border-[#DEF767]/60 bg-[#181818] text-[#DEF767] shadow-[0_0_30px_rgba(222,247,103,0.18)] transition-all duration-300 sm:h-20 sm:w-20 xl:h-24 xl:w-24 ${
+                  leverPulled ? "top-[70%]" : "top-4"
+                }`}
+              >
+                <Zap size={30} />
+              </span>
+
+              <span className="absolute bottom-0 left-1/2 h-10 w-28 -translate-x-1/2 border border-[#2e2e2e] bg-[#181818]" />
+            </button>
+
+            <button
+              type="button"
+              disabled={isBusy || isRolling || hasActiveAuction || bidding?.phase === "finished"}
+              onClick={pullLever}
+              className="mt-6 w-full border border-[rgba(222,247,103,0.5)] bg-[#181818] px-4 py-3.5 font-mono text-[11px] uppercase tracking-[0.14em] text-[#DEF767] disabled:opacity-40"
+            >
+              {isRolling ? "Rolling..." : "Pull Lever"}
+            </button>
+
+            <button
+              type="button"
+              disabled={isBusy || isRolling || !hasActiveAuction || !hasValidBid}
+              onClick={onClose}
+              className="mt-3 w-full border border-[#ff6a6a]/60 bg-[#181818] px-4 py-3.5 font-mono text-[11px] uppercase tracking-[0.14em] text-[#ff6a6a] disabled:opacity-40"
+            >
+              {isBusy ? "Closing..." : "Sold"}
+            </button>
+
+            {hasActiveAuction && !hasValidBid && (
+              <p className="mt-3 text-center text-[11px] leading-5 text-[#5b5b5b]">
+                A valid leader bid is required before the host can mark this member as sold.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-6 grid gap-3 md:grid-cols-3 xl:gap-5">
+          <div className="border border-[#2e2e2e] bg-[#111] p-4">
+            <Crown className="text-[#DEF767]" size={18} />
+            <p className="mt-3 font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+              Current Bidder
+            </p>
+            <p className="mt-1 font-sans text-xl uppercase text-white">
+              {currentBid?.leaderName || "Awaiting Bid"}
+            </p>
+          </div>
+
+          <div className="border border-[#2e2e2e] bg-[#111] p-4 xl:p-6">
+            <Gavel className="text-[#ff6a6a]" size={18} />
+            <p className="mt-3 font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+              Auction Status
+            </p>
+            <p className="mt-1 font-sans text-xl uppercase text-white">
+              {hasActiveAuction ? "Live" : bidding?.phase === "finished" ? "Closed" : "Idle"}
+            </p>
+          </div>
+
+          <div className="border border-[#2e2e2e] bg-[#111] p-4">
+            <Users className="text-[#929292]" size={18} />
+            <p className="mt-3 font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+              Members Remaining
+            </p>
+            <p className="mt-1 font-sans text-xl uppercase text-white">
+              {availableEntries.length}
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+
+function HostControls({
+  bidding,
+  isBusy,
+  onDraw,
+  onClose,
+}: {
+  bidding: any;
+  isBusy: boolean;
+  onDraw: () => void;
+  onClose: () => void;
+}) {
+  const hasActiveAuction = bidding?.phase === "auction" && bidding?.currentNominee;
+  // const hasValidBid = Number(bidding?.currentBid?.amount || 0) > 0;
+  const hasValidBid =
+    Number(bidding?.currentBid?.amount || 0) > 0 &&
+    !!bidding?.currentBid?.leaderUserId &&
+    (!!bidding?.currentBid?.teamId ||
+    !!bidding?.leaders?.[bidding?.currentBid?.leaderUserId]?.teamId);
+  return (
+    <section className="border border-[#2e2e2e] bg-[#171717]/70 p-4">
+      <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#5b5b5b]">
+        Host Controls
+      </p>
+
+      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <button
+          type="button"
+          disabled={isBusy || hasActiveAuction || bidding?.phase === "finished"}
+          onClick={onDraw}
+          className="border border-[rgba(222,247,103,0.5)] bg-[#181818] py-3.5 font-mono text-[11px] uppercase tracking-[0.14em] text-[#DEF767] disabled:opacity-40"
+        >
+          {isBusy ? "Drawing..." : "Draw Next Member"}
+        </button>
+
+        <button
+          type="button"
+          disabled={isBusy || !hasActiveAuction || !hasValidBid}
+          onClick={onClose}
+          className="border border-[#ff6a6a]/60 bg-[#181818] py-3.5 font-mono text-[11px] uppercase tracking-[0.14em] text-[#ff6a6a] disabled:opacity-40"
+        >
+          {isBusy ? "Closing..." : "Close / Sold"}
+        </button>
+      </div>
+
+      {!hasValidBid && hasActiveAuction && (
+        <p className="mt-3 text-[11px] text-[#5b5b5b]">
+          A bid must be placed before the host can close this auction.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function LeaderControls({
+  myLeader,
+  currentBid,
+  currentNominee,
+  bidAmount,
+  setBidAmount,
+  currentRequiredBid,
+  isBusy,
+  onPlaceBid,
+}: {
+  myLeader: any;
+  currentBid: any;
+  currentNominee: any;
+  bidAmount: string;
+  setBidAmount: (value: string) => void;
+  currentRequiredBid: number;
+  isBusy: boolean;
+  onPlaceBid: (amount?: number) => void;
+}) {
+  const isHighest = currentBid?.leaderUserId === myLeader?.userId;
+  const tokensLeft = Number(myLeader?.tokensLeft || 0);
+
+  return (
+    <section className="border border-[#2e2e2e] bg-[#171717]/70 p-4">
+      <div className="flex items-center gap-2">
+        <Coins size={15} className="text-[#DEF767]" />
+        <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#5b5b5b]">
+          Leader Bid Console
+        </p>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-px border border-[#2e2e2e] bg-[#2e2e2e]">
+        <div className="bg-[#181818] p-3">
+          <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b]">Tokens Left</p>
+          <p className="mt-1 font-sans text-xl text-[#DEF767]">{formatTokens(tokensLeft)}</p>
+        </div>
+        <div className="bg-[#181818] p-3">
+          <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b]">Spent</p>
+          <p className="mt-1 font-sans text-xl text-white">{formatTokens(myLeader?.spent)}</p>
+        </div>
+      </div>
+
+      {isHighest && (
+        <div className="mt-4 border border-[#DEF767]/40 bg-[#DEF767]/10 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[#DEF767]">
+          You are currently the highest bidder.
+        </div>
+      )}
+
+      <div className="mt-4 space-y-3">
+        <input
+          type="number"
+          value={bidAmount}
+          onChange={(event) => setBidAmount(event.target.value)}
+          placeholder={`MIN ${formatTokens(currentRequiredBid)}`}
+          disabled={!currentNominee || isBusy}
+          className="w-full border border-[#2e2e2e] bg-[#181818] px-4 py-3 font-mono text-sm text-white outline-none placeholder:text-[#5b5b5b]"
+        />
+
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {[50_000, 100_000, 250_000].map((increment) => (
+            <button
+              key={increment}
+              type="button"
+              disabled={!currentNominee || isBusy}
+              onClick={() => onPlaceBid(Number(currentBid?.amount || 0) + increment)}
+              className="border border-[#2e2e2e] bg-[#181818] py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[#929292] disabled:opacity-40"
+            >
+              +{formatTokens(increment)}
+            </button>
+          ))}
+
+          <button
+            type="button"
+            disabled={!currentNominee || isBusy || tokensLeft <= 0}
+            onClick={() => onPlaceBid(tokensLeft)}
+            className="border border-[#2e2e2e] bg-[#181818] py-2 font-mono text-[10px] uppercase tracking-[0.12em] text-[#929292] disabled:opacity-40"
+          >
+            All In
+          </button>
+        </div>
+
+        <button
+          type="button"
+          disabled={!currentNominee || isBusy}
+          onClick={() => onPlaceBid()}
+          className="w-full border border-[rgba(222,247,103,0.5)] bg-[#181818] py-3.5 font-mono text-[11px] uppercase tracking-[0.14em] text-[#DEF767] disabled:opacity-40"
+        >
+          {isBusy ? "Placing Bid..." : "Place Bid"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function SpectatorPanel({
+  amCurrentNominee,
+  soldToMe,
+  currentNominee,
+}: {
+  amCurrentNominee: boolean;
+  soldToMe: any;
+  currentNominee: any;
+}) {
+  return (
+    <section className="border border-[#2e2e2e] bg-[#171717]/70 p-4">
+      <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#5b5b5b]">
+        Spectator Feed
+      </p>
+
+      <div className="mt-3 border border-[#2e2e2e] bg-[#181818] p-4">
+        {soldToMe ? (
+          <>
+            <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#DEF767]">
+              Assigned to Team
+            </p>
+            <p className="mt-2 text-[13px] leading-5 text-[#929292]">
+              You were won by <span className="text-white">{soldToMe.leaderName}</span> and are now part of{" "}
+              <span className="text-white">{soldToMe.teamName}</span>.
+            </p>
+          </>
+        ) : amCurrentNominee ? (
+          <>
+            <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#ff6a6a]">
+              You are being bid on
+            </p>
+            <p className="mt-2 text-[13px] leading-5 text-[#929292]">
+              Leaders are placing bids for your team assignment.
+            </p>
+          </>
+        ) : currentNominee ? (
+          <>
+            <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292]">
+              Watching auction
+            </p>
+            <p className="mt-2 text-[13px] leading-5 text-[#929292]">
+              Current member on bid: <span className="text-white">{currentNominee.name}</span>.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292]">
+              Waiting
+            </p>
+            <p className="mt-2 text-[13px] leading-5 text-[#929292]">
+              Waiting for the host to draw the next member.
+            </p>
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function LeaderBoard({
+  leaders,
+  currentLeaderId,
+}: {
+  leaders: any[];
+  currentLeaderId?: string | null;
+}) {
+  return (
+    <section className="border border-[#2e2e2e] bg-[#171717]/70 p-4">
+      <div className="flex items-center gap-2">
+        <Trophy size={15} className="text-[#DEF767]" />
+        <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#5b5b5b]">
+          Leader Wallets
+        </p>
+      </div>
+
+      <div className="mt-4 space-y-2">
+        {leaders.map((leader) => {
+          const isCurrent = currentLeaderId === leader.userId;
+
+          return (
+            <div
+              key={leader.userId}
+              className={`border p-3 ${
+                isCurrent
+                  ? "border-[#DEF767]/50 bg-[#DEF767]/10"
+                  : "border-[#2e2e2e] bg-[#181818]"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-sans text-sm uppercase tracking-[0.04em] text-white">
+                    {leader.name}
+                  </p>
+                  <p className="mt-1 font-mono text-[9px] uppercase tracking-[0.12em] text-[#5b5b5b]">
+                    {leader.teamName}
+                  </p>
+                </div>
+
+                <div className="text-right">
+                  <p className="font-mono text-[10px] text-[#DEF767]">
+                    {formatTokens(leader.tokensLeft)}
+                  </p>
+                  <p className="mt-1 font-mono text-[9px] text-[#5b5b5b]">
+                    spent {formatTokens(leader.spent)}
+                  </p>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+
+        {leaders.length === 0 && (
+          <p className="text-[12px] text-[#5b5b5b]">No leaders loaded.</p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function BiddingStats({ entries, sold }: { entries: any[]; sold: any[] }) {
+  const soldCount = sold.length;
+  const total = entries.length;
+  const remaining = entries.filter((entry) => !entry.sold).length;
+
+  return (
+    <section className="grid grid-cols-3 gap-px border border-[#2e2e2e] bg-[#2e2e2e]">
+      <div className="bg-[#171717]/70 p-3 text-center">
+        <Users className="mx-auto text-[#5b5b5b]" size={16} />
+        <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.12em] text-[#5b5b5b]">Total</p>
+        <p className="mt-1 font-sans text-xl text-white">{total}</p>
+      </div>
+      <div className="bg-[#171717]/70 p-3 text-center">
+        <Gavel className="mx-auto text-[#5b5b5b]" size={16} />
+        <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.12em] text-[#5b5b5b]">Sold</p>
+        <p className="mt-1 font-sans text-xl text-white">{soldCount}</p>
+      </div>
+      <div className="bg-[#171717]/70 p-3 text-center">
+        <Radio className="mx-auto text-[#5b5b5b]" size={16} />
+        <p className="mt-2 font-mono text-[9px] uppercase tracking-[0.12em] text-[#5b5b5b]">Left</p>
+        <p className="mt-1 font-sans text-xl text-white">{remaining}</p>
+      </div>
+    </section>
+  );
+}
+
+function BidLogs({ logs }: { logs: string[] }) {
+  return (
+    <section className="border border-[#2e2e2e] bg-[#171717]/70 p-4">
+      <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#5b5b5b]">
+        Auction Logs
+      </p>
+
+      <div className="mt-3 max-h-44 space-y-2 overflow-auto pr-1">
+        {logs.slice(0, 12).map((log, index) => (
+          <div
+            key={`${log}-${index}`}
+            className="border border-[#2e2e2e] bg-[#181818] px-3 py-2 font-mono text-[10px] uppercase tracking-[0.08em] text-[#929292]"
+          >
+            {log}
+          </div>
+        ))}
+
+        {logs.length === 0 && (
+          <p className="text-[12px] text-[#5b5b5b]">No bidding logs yet.</p>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -2256,18 +5354,77 @@ import GameBoard from "@/components/game/GameBoard/GameBoard";
 import Leaderboard from "@/components/views/Leaderboard/Leaderboard";
 import FABRail from "@/components/core/FABRail/FABRail";
 
-function PersonaFlowBridge() {
-  const searchParams = useSearchParams();
-  const mode = searchParams.get("mode");
-  
+// 1. The Bridge Logic (Expects the mode to be passed down)
+function PersonaFlowBridge({ isMultiplayer }: { isMultiplayer: boolean }) {
   const { userId, room, gameState, updateGameState, activeRoomCode } = useMultiplayer();
-  const isMultiplayer = mode !== "singleplayer" && !!activeRoomCode;
+  const isMultiplayerActive = isMultiplayer && !!activeRoomCode;
 
   const { state, dispatch } = useGame();
+  const myExistingClaim = room?.room_persona_claims?.find(
+    (claim: any) => claim.user_id === userId
+  );
 
-  // 1. Sync User Data Automatically in Multiplayer
+
+
+
+
+
+  // useEffect(() => {
+  //   if (!isMultiplayerActive || !room || !userId) return;
+
+  //   const existingClaim = room.room_persona_claims?.find(
+  //     (claim: any) => claim.user_id === userId
+  //   );
+
+  //   if (!existingClaim) return;
+
+  //   // Do not keep an already-assigned player inside the card game.
+  //   if (
+  //     state.gamePhase !== 'USER_SELECT' &&
+  //     state.gamePhase !== 'DOMAIN_SELECT'
+  //   ) {
+  //     dispatch({ type: 'GO_TO_PHASE', payload: 'DOMAIN_SELECT' });
+  //   }
+  // }, [
+  //   isMultiplayerActive,
+  //   room,
+  //   room?.room_persona_claims,
+  //   userId,
+  //   state.gamePhase,
+  //   dispatch,
+  // ]);
+
   useEffect(() => {
-    if (isMultiplayer && room && state.gamePhase === 'USER_SELECT') {
+    if (!isMultiplayerActive || !room || !state.selectedPersona || !userId) return;
+
+    const shouldWatchForOutpaced =
+      state.gamePhase === 'PLAYING' || state.gamePhase === 'WON';
+
+    if (!shouldWatchForOutpaced) return;
+
+    const claim = room.room_persona_claims?.find(
+      (c: any) => c.persona_id === state.selectedPersona?.id
+    );
+
+    if (claim && claim.user_id !== userId) {
+      dispatch({
+        type: 'PERSONA_TAKEN_BY',
+        payload: claim.user?.name || 'Another player',
+      });
+    }
+  }, [
+    isMultiplayerActive,
+    room?.room_persona_claims,
+    state.selectedPersona,
+    state.gamePhase,
+    userId,
+    dispatch,
+  ]);
+
+
+  // Sync User Data Automatically in Multiplayer
+  useEffect(() => {
+    if (isMultiplayerActive && room && state.gamePhase === 'USER_SELECT') {
       const me = room.room_players.find(p => p.user.id === userId);
       if (me) {
         dispatch({
@@ -2281,53 +5438,138 @@ function PersonaFlowBridge() {
         dispatch({ type: 'GO_TO_PHASE', payload: 'DOMAIN_SELECT' });
       }
     }
-  }, [isMultiplayer, room, state.gamePhase, userId, dispatch]);
+  }, [isMultiplayerActive, room, state.gamePhase, userId, dispatch]);
 
-  // 2. Broadcast Local Wins to the Multiplayer Matrix
-  useEffect(() => {
-    if (isMultiplayer && state.gamePhase === 'WON' && state.personaClaimed) {
-      const syncClaim = async () => {
-        const currentClaims = gameState?.claims || {};
-        const currentLogs = gameState?.logs || [];
-        
-        // Prevent duplicate broadcast
-        if (currentClaims[state.selectedPersona!.id] === userId) return;
+  // Broadcast Local Wins to the Multiplayer Matrix
+  // useEffect(() => {
+  //   if (isMultiplayerActive && state.gamePhase === 'WON' && state.personaClaimed) {
+  //     const syncClaim = async () => {
+  //       const currentClaims = gameState?.claims || {};
+  //       const currentLogs = gameState?.logs || [];
 
-        await updateGameState({
-          ...gameState,
-          claims: {
-            ...currentClaims,
-            [state.selectedPersona!.id]: userId
-          },
-          logs: [
-            `Node ${state.currentUser?.username} secured persona: ${state.selectedPersona!.name}`,
-            ...currentLogs
-          ].slice(0, 20)
-        });
-      };
-      syncClaim();
-    }
-  }, [state.gamePhase, state.personaClaimed]);
+  //       if (currentClaims[state.selectedPersona!.id] === userId) return;
 
-  // 3. Listen for Rival Claims and Update Local State
-  useEffect(() => {
-    if (isMultiplayer && gameState?.claims && state.selectedPersona) {
-      const claimedBy = gameState.claims[state.selectedPersona.id];
-      
-      // If claimed by someone else, trigger the taken screen
-      if (claimedBy && claimedBy !== userId) {
-        const rivalPlayer = room?.room_players.find(p => p.user.id === claimedBy);
-        dispatch({ 
-          type: 'PERSONA_TAKEN_BY', 
-          payload: rivalPlayer?.user.name || 'Rival Node' 
-        });
-      }
-    }
-  }, [gameState?.claims, state.selectedPersona, userId, room, dispatch]);
+  //       await updateGameState({
+  //         ...gameState,
+  //         claims: {
+  //           ...currentClaims,
+  //           [state.selectedPersona!.id]: userId
+  //         },
+  //         logs: [
+  //           `Node ${state.currentUser?.username} secured persona: ${state.selectedPersona!.name}`,
+  //           ...currentLogs
+  //         ].slice(0, 20)
+  //       });
+  //     };
+  //     syncClaim();
+  //   }
+  // }, [
+  //   isMultiplayerActive,
+  //   state.gamePhase,
+  //   state.personaClaimed,
+  //   state.selectedPersona,
+  //   state.currentUser,
+  //   gameState,
+  //   updateGameState,
+  //   userId,
+  // ]);
+  
+
+
+
+  // ---------------------------------------------------------------------------------------
+  // useEffect(() => {
+  //   if (
+  //     !isMultiplayerActive ||
+  //     state.gamePhase !== 'WON' ||
+  //     !state.personaClaimed ||
+  //     !state.selectedPersona
+  //   ) {
+  //     return;
+  //   }
+
+  //   const syncClaim = async () => {
+  //     const currentClaims = gameState?.claims || {};
+  //     const currentLogs = gameState?.logs || [];
+
+  //     if (currentClaims[state.selectedPersona!.id] === userId) return;
+
+  //     await updateGameState({
+  //       ...gameState,
+  //       claims: {
+  //         ...currentClaims,
+  //         [state.selectedPersona!.id]: userId,
+  //       },
+  //       logs: [
+  //         `Node ${state.currentUser?.username} secured persona: ${state.selectedPersona!.name}`,
+  //         ...currentLogs,
+  //       ].slice(0, 20),
+  //     });
+  //   };
+
+  //   syncClaim();
+  // }, [
+  //   isMultiplayerActive,
+  //   state.gamePhase,
+  //   state.personaClaimed,
+  //   state.selectedPersona,
+  //   state.currentUser,
+  //   gameState,
+  //   updateGameState,
+  //   userId,
+  // ]);
+  // ---------------------------------------------------------------------------------------
+
+
+
+  // Listen for Rival Claims and Update Local State
+
+  // useEffect(() => {
+  //   if (isMultiplayerActive && gameState?.claims && state.selectedPersona) {
+  //     const claimedBy = gameState.claims[state.selectedPersona.id];
+
+  //     if (claimedBy && claimedBy !== userId) {
+  //       const rivalPlayer = room?.room_players.find(p => p.user.id === claimedBy);
+  //       dispatch({ 
+  //         type: 'PERSONA_TAKEN_BY', 
+  //         payload: rivalPlayer?.user.name || 'Rival Node' 
+  //       });
+  //     }
+  //   }
+  // }, [gameState?.claims, state.selectedPersona, userId, room, dispatch]);
+
+  if (isMultiplayerActive && myExistingClaim) {
+    return (
+      <div className="min-h-[420px] border border-[#2e2e2e] bg-[#171717]/70 p-6 text-center flex flex-col items-center justify-center">
+        <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#DEF767]">
+          Persona Already Assigned
+        </p>
+
+        <h2 className="mt-3 font-sans text-3xl uppercase tracking-[0.04em] text-white">
+          {myExistingClaim.persona_name}
+        </h2>
+
+        <p className="mt-2 font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292]">
+          Domain: {myExistingClaim.domain_name}
+        </p>
+
+        <p className="mt-5 max-w-[34ch] text-[13px] leading-6 text-[#929292]">
+          You have already secured a persona in this room. You cannot play the card game again unless you drop your persona from My Team.
+        </p>
+
+        <a
+          href="/myteam"
+          className="mt-6 border border-[rgba(222,247,103,0.5)] px-5 py-3 font-mono text-[11px] uppercase tracking-[0.14em] text-[#DEF767]"
+        >
+          Go to My Team
+        </a>
+      </div>
+    );
+  }
 
   return (
     <div className="relative flex flex-col w-full h-full min-h-[600px] bg-[#181818] overflow-hidden rounded-xl border border-[#2e2e2e]">
-      {state.gamePhase === 'USER_SELECT' && <UserSelect />}
+      {/* {state.gamePhase === 'USER_SELECT' && <UserSelect />} */}
       {state.gamePhase === 'DOMAIN_SELECT' && <DomainSelect />}
       {state.gamePhase === 'PERSONA_SELECT' && <PersonaSelect />}
       {state.gamePhase === 'LEADERBOARD' && <Leaderboard />}
@@ -2339,11 +5581,11 @@ function PersonaFlowBridge() {
   );
 }
 
-export default function PersonaFlowPage() {
+// 2. The Inner Wrapper (Safe to use useSearchParams here)
+function PersonaFlowPageInner() {
   const searchParams = useSearchParams();
   const mode = searchParams.get("mode");
   const isMultiplayer = mode !== "singleplayer";
-
   return (
     <GameShell
       meta={`UXATHON / ENVIRONMENT / PERSONA FLOW / [${isMultiplayer ? "MULTIPLAYER" : "SINGLEPLAYER"}]`}
@@ -2351,11 +5593,24 @@ export default function PersonaFlowPage() {
       description="Navigate the matrix. Align archetypes to operational realities before your rivals."
     >
       <GameProvider>
-        <Suspense fallback={<div className="p-8 text-center text-[#5b5b5b] font-mono uppercase text-[11px]">Initializing Pipeline...</div>}>
-          <PersonaFlowBridge />
-        </Suspense>
+        <PersonaFlowBridge isMultiplayer={isMultiplayer} />
       </GameProvider>
     </GameShell>
+  );
+}
+
+// 3. The Default Export (Provides the Suspense Boundary to prevent Next.js build crash)
+export default function PersonaFlowPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-[#181818] flex items-center justify-center font-mono text-[11px] uppercase tracking-widest text-[#5b5b5b]">
+          Loading Matrix...
+        </div>
+      }
+    >
+      <PersonaFlowPageInner />
+    </Suspense>
   );
 }
 
@@ -2633,7 +5888,7 @@ import { numberMemoryConfig } from "./number-memory/config";
 import { reactionTimeConfig } from "./reaction-time/config";
 import { sequenceMemoryConfig } from "./sequence-memory/config";
 import { personaFlowConfig } from "./persona-flow/config";
-
+import { biddingConfig } from "./bidding/config";
 
 const gameRegistry = new Map<string, GameDefinition>();
 // 2. Auto-register them into the Map immediately
@@ -2642,7 +5897,8 @@ const coreGames = [
   numberMemoryConfig,
   reactionTimeConfig,
   sequenceMemoryConfig,
-  personaFlowConfig
+  personaFlowConfig,
+  biddingConfig
 ];
 
 coreGames.forEach((config) => {
@@ -2908,7 +6164,7 @@ export interface GameDefinition {
   id: string;
   name: string;
   description?: string;
-  category: 'cognitive' | 'reflex' | 'design' | 'accessibility';
+  category: 'strategy' | 'cognitive' | 'reflex' | 'design' | 'accessibility';
   scoring: GameScoring;
   realtime: boolean;
   leaderboard: boolean;
@@ -2968,7 +6224,7 @@ body {
 ### File: `app/layout.tsx`
 
 ```tsx
-    import type { Metadata } from "next";
+import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/context/token-context";
@@ -3000,11 +6256,13 @@ export default function RootLayout({
             suppressHydrationWarning
             className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
             >
+            <body className="min-h-full flex flex-col">
             <ApolloWrapper>
                 <AuthProvider>
-                    <body className="min-h-full flex flex-col">{children}</body>
+                    {children}
                 </AuthProvider>
             </ApolloWrapper>
+            </body>
         </html>
     );
 }
@@ -3904,9 +7162,405 @@ export default function UXISMLoginPage() {
 ```tsx
 
 
+// "use client";
+
+// import { useEffect, useState } from "react";
+// import Link from "next/link";
+// import { ArrowLeft, Users, Crown } from "lucide-react";
+// import { gql } from "@apollo/client";
+// import { useQuery } from "@apollo/client/react";
+// import { useAuth } from "@/context/token-context";
+
+// // const GET_MY_TEAM = gql`
+// //   query GetMyTeam($userId: uuid!) {
+// //     team_members(where: { user_id: { _eq: $userId } }) {
+// //       id
+// //       member_type
+// //       team {
+// //         id
+// //         name
+// //         created_at
+// //         created_by
+// //         team_members {
+// //           id
+// //           member_type
+// //           user {
+// //             id
+// //             name
+// //             profile_picture
+// //           }
+// //         }
+// //       }
+// //     }
+// //   }
+// // `;
+
+// const GET_MY_TEAM = gql`
+//   query GetMyTeam($userId: uuid!) {
+//       team (where: { user_id: { _eq: $userId } }){
+//         id
+//         name
+//         created_at
+//         created_by
+//         leader_id
+//         room_id
+//         domain_id
+//         domain_name
+//         domain_description
+//         persona_id
+//         persona_name
+//         persona_hex
+//         team_members {
+//           id
+//           member_type
+//           user {
+//             id
+//             name
+//             profile_picture
+//           }
+//         }
+//       }
+//   }
+// `;
+
+// function getInitials(name?: string | null) {
+//   if (!name || !name.trim()) return "UX";
+//   return name
+//     .trim()
+//     .split(" ")
+//     .filter(Boolean)
+//     .slice(0, 2)
+//     .map((p) => p[0])
+//     .join("")
+//     .toUpperCase();
+// }
+
+// function getImageUrl(imagePath?: string | null) {
+//   if (!imagePath) return "";
+//   if (imagePath.startsWith("http") || imagePath.startsWith("data:")) {
+//     return imagePath;
+//   }
+//   const backendUrl =
+//     process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000";
+//   return `${backendUrl}/uploads/${imagePath}`;
+// }
+
+// type TeamMember = {
+//   id: string;
+//   member_type: string;
+//   user?: {
+//     id: string;
+//     name: string;
+//     profile_picture: string;
+//   };
+// };
+
+// type Team = {
+//   id: string;
+//   name: string;
+//   created_at: string;
+//   created_by: string;
+//   leader_id?: string | null;
+//   room_id?: string | null;
+//   domain_id?: string | null;
+//   domain_name?: string | null;
+//   domain_description?: string | null;
+//   persona_id?: string | null;
+//   persona_name?: string | null;
+//   persona_hex?: string | null;
+//   team_members: TeamMember[];
+// };
+
+// export default function MyTeamPage() {
+//   const auth = useAuth();
+//   const authData = auth?.getData() as { id?: string };
+//   const userId = authData?.id;
+
+//   const [isDropping, setIsDropping] = useState(false);
+//   const [dropError, setDropError] = useState("");
+//   const hasUserId = Boolean(userId);
+//   const { data, loading, error, refetch } = useQuery<{
+//     team_members: { id: string; member_type: string; team: Team }[];
+//   }>(GET_MY_TEAM, {
+//     variables: { userId },
+//     skip: !userId,
+//     fetchPolicy: "network-only", // <-- always fetch fresh, don't use cache
+//   });
+
+//   console.log("data",data)
+
+//   async function dropPersona() {
+//     if (!team?.id) return;
+
+//     const confirmed = window.confirm(
+//       `Drop ${team.persona_name || team.name}? This will make the persona available again.`
+//     );
+
+//     if (!confirmed) return;
+
+//     setIsDropping(true);
+//     setDropError("");
+
+//     try {
+//       const token = auth.getJwt();
+
+//       const res = await fetch("/api/persona-flow/drop", {
+//         method: "POST",
+//         headers: {
+//           "Content-Type": "application/json",
+//           Authorization: token ? `Bearer ${token}` : "",
+//         },
+//         body: JSON.stringify({
+//           teamId: team.id,
+//         }),
+//       });
+
+//       const data = await res.json();
+
+//       if (!res.ok) {
+//         throw new Error(data.error || "Failed to drop persona");
+//       }
+
+//       await refetch();
+//     } catch (err: any) {
+//       console.error("Drop persona failed:", err);
+//       setDropError(err.message || "Failed to drop persona");
+//     } finally {
+//       setIsDropping(false);
+//     }
+//   }
+
+  
+
+//   // const myRecord = data?.team_members?.[0];
+//   // const team = myRecord?.team;
+//   // const members: TeamMember[] = team?.team_members ?? [];
+//   const myRecord = data?.team_members?.[0];
+// // Hasura is returning team as an array (misconfigured as array relationship)
+// // so we handle both cases defensively
+// // const team: Team | null = Array.isArray(myRecord?.team)
+// //   ? myRecord.team[0] ?? null
+// //   : myRecord?.team ?? null;
+
+
+//   const rawTeam = Array.isArray(myRecord?.team)
+//   ? myRecord.team[0] ?? null
+//   : myRecord?.team ?? null;
+
+//   const team: Team | null = rawTeam
+//   ? {
+//       ...rawTeam,
+//       team_members: Array.isArray(rawTeam.team_members)
+//         ? rawTeam.team_members
+//         : rawTeam.team_members
+//         ? [rawTeam.team_members]  // fallback if still object
+//         : [],
+//     }
+//   : null;
+
+//   console.log("team object:", JSON.stringify(team, null, 2));
+// // const members: TeamMember[] = Array.isArray(team?.team_members)
+// //   ? team.team_members
+// //   : [];
+
+// const members: TeamMember[] = team?.team_members ?? [];
+//   console.log("myRecord",myRecord)
+//   console.log("team",team)
+//   console.log("members",members)
+  
+
+//   // Loading state
+//   if (loading || !userId) {
+//     return (
+//       <main className="relative min-h-screen bg-[#181818] text-white flex items-center justify-center">
+//         <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+//           Loading team data…
+//         </p>
+//       </main>
+//     );
+//   }
+
+//   // Error state — show full error message to help debug
+//   if (error) {
+//     return (
+//       <main className="relative min-h-screen bg-[#181818] text-white flex items-center justify-center">
+//         <div className="text-center">
+//           <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#ff6a6a]">
+//             GraphQL Error
+//           </p>
+//           <p className="mt-2 font-mono text-[11px] text-[#929292]">
+//             {error.message}
+//           </p>
+//         </div>
+//       </main>
+//     );
+//   }
+
+//   return (
+//     <main className="relative min-h-screen overflow-hidden bg-[#181818] text-white selection:bg-[#ff6a6a] selection:text-[#171717]">
+//       <div className="pointer-events-none fixed inset-0 opacity-25 [background-image:radial-gradient(#5b5b5b_1px,transparent_1px)] [background-size:18px_18px]" />
+
+//       <header className="relative z-20 flex items-center justify-between border-b border-[#2e2e2e] bg-[#181818]/95 px-5 py-4 backdrop-blur-[2px]">
+//         <Link
+//           href="/dashboard"
+//           className="flex h-10 items-center gap-2 border border-[#2e2e2e] px-4 font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292] active:border-[rgba(222,247,103,0.5)] active:text-[#DEF767]"
+//         >
+//           <ArrowLeft size={14} aria-hidden />
+//           Dashboard
+//         </Link>
+//         <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+//           My Team
+//         </p>
+//       </header>
+
+//       <section className="relative z-10 mx-auto flex w-full max-w-3xl flex-col gap-6 px-5 py-8">
+        
+//         {team?.room_id && team?.persona_id && (
+//           <div className="mt-6 border border-[#ff6a6a]/30 bg-[#ff6a6a]/5 p-4">
+//             <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#ff6a6a]">
+//               Persona Assignment
+//             </p>
+
+//             <p className="mt-2 font-sans text-xl uppercase tracking-[0.04em] text-white">
+//               {team.persona_name || team.name}
+//             </p>
+
+//             {team.domain_name && (
+//               <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-[#929292]">
+//                 Domain: {team.domain_name}
+//               </p>
+//             )}
+
+//             {team.persona_hex && (
+//               <div className="mt-3 flex items-center gap-2">
+//                 <span
+//                   className="h-3 w-3 rounded-full border border-white/20"
+//                   style={{ backgroundColor: team.persona_hex }}
+//                 />
+//                 <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+//                   {team.persona_hex}
+//                 </span>
+//               </div>
+//             )}
+
+//             <button
+//               type="button"
+//               onClick={dropPersona}
+//               disabled={isDropping}
+//               className="mt-4 w-full border border-[#ff6a6a]/60 bg-transparent px-4 py-3 font-mono text-[11px] uppercase tracking-[0.14em] text-[#ff6a6a] disabled:opacity-40"
+//             >
+//               {isDropping ? "Dropping Persona..." : "Drop Persona"}
+//             </button>
+
+//             {dropError && (
+//               <p className="mt-3 font-mono text-[10px] uppercase tracking-[0.12em] text-[#ff6a6a]">
+//                 {dropError}
+//               </p>
+//             )}
+//           </div>
+//         )}
+        
+//         {!team ? (
+//           <div className="border border-[#2e2e2e] bg-[#171717] px-6 py-8 text-center">
+//             <p className="font-sans text-[20px] uppercase tracking-[0.04em] text-white">
+//               No Team Found
+//             </p>
+//             <p className="mt-2 text-[13px] text-[#929292]">
+//               You are not currently assigned to any team.
+//             </p>
+//             {/* Debug info — remove once working */}
+//             <p className="mt-4 font-mono text-[10px] text-[#5b5b5b]">
+//               user_id: {userId} | team_members returned:{" "}
+//               {data?.team_members?.length ?? 0}
+//             </p>
+//           </div>
+//         ) : (
+//           <>
+//             {/* Team Header */}
+//             <div className="border border-[#2e2e2e] bg-[#171717] px-6 py-8">
+//               <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#5b5b5b]">
+//                 TEAM PROFILE
+//               </p>
+//               <h1 className="mt-2 font-sans text-[32px] uppercase tracking-[0.04em] text-white">
+//                 {team.name}
+//               </h1>
+//               <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+//                 Created{" "}
+//                 {new Date(team.created_at).toLocaleDateString("en-US", {
+//                   month: "short",
+//                   day: "numeric",
+//                   year: "numeric",
+//                 })}
+//               </p>
+//             </div>
+
+//             {/* Members List */}
+//             <div className="border border-[#2e2e2e] bg-[#171717]">
+//               <div className="border-b border-[#2e2e2e] px-6 py-4 flex items-center justify-between">
+//                 <h2 className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292]">
+//                   Team Members
+//                 </h2>
+//                 <div className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+//                   <Users size={14} />
+//                   <span>{members.length} Members</span>
+//                 </div>
+//               </div>
+
+//               <div className="divide-y divide-[#2e2e2e]">
+//                 {members.map((member) => {
+//                   const isLeader = member.user?.id === team.created_by;
+//                   return (
+//                     <div
+//                       key={member.id}
+//                       className="flex items-center justify-between px-6 py-5"
+//                     >
+//                       <div className="flex items-center gap-4">
+//                         {member.user?.profile_picture ? (
+//                           // eslint-disable-next-line @next/next/no-img-element
+//                           <img
+//                             src={getImageUrl(member.user.profile_picture)}
+//                             alt=""
+//                             className="h-12 w-12 border border-[#2e2e2e] object-cover"
+//                           />
+//                         ) : (
+//                           <div className="grid h-12 w-12 place-items-center border border-[#2e2e2e] bg-[#181818] font-mono text-[14px] uppercase tracking-[0.08em] text-[#ff6a6a]">
+//                             {getInitials(member.user?.name)}
+//                           </div>
+//                         )}
+//                         <div>
+//                           <div className="flex items-center gap-2">
+//                             <p className="font-sans text-[18px] uppercase tracking-[0.04em] text-white">
+//                               {member.user?.name || "Unknown User"}
+//                             </p>
+//                             {isLeader && (
+//                               <Crown
+//                                 size={14}
+//                                 className="text-[#DEF767]"
+//                                 aria-label="Team Leader"
+//                               />
+//                             )}
+//                           </div>
+//                           <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+//                             {isLeader ? "LEADER" : member.member_type || "MEMBER"}
+//                           </p>
+//                         </div>
+//                       </div>
+//                     </div>
+//                   );
+//                 })}
+//               </div>
+//             </div>
+//           </>
+//         )}
+//       </section>
+//     </main>
+//   );
+// }
+
+
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Users, Crown } from "lucide-react";
 import { gql } from "@apollo/client";
@@ -3923,6 +7577,14 @@ const GET_MY_TEAM = gql`
         name
         created_at
         created_by
+        leader_id
+        room_id
+        domain_id
+        domain_name
+        domain_description
+        persona_id
+        persona_name
+        persona_hex
         team_members {
           id
           member_type
@@ -3936,6 +7598,38 @@ const GET_MY_TEAM = gql`
     }
   }
 `;
+
+type TeamMember = {
+  id: string;
+  member_type: string;
+  user?: {
+    id: string;
+    name: string | null;
+    profile_picture: string | null;
+  } | null;
+};
+
+type Team = {
+  id: string;
+  name: string;
+  created_at: string;
+  created_by: string;
+  leader_id?: string | null;
+  room_id?: string | null;
+  domain_id?: string | null;
+  domain_name?: string | null;
+  domain_description?: string | null;
+  persona_id?: string | null;
+  persona_name?: string | null;
+  persona_hex?: string | null;
+  team_members?: TeamMember[] | TeamMember | null;
+};
+
+type TeamRecord = {
+  id: string;
+  member_type: string;
+  team: Team | Team[] | null;
+};
 
 function getInitials(name?: string | null) {
   if (!name || !name.trim()) return "UX";
@@ -3954,101 +7648,158 @@ function getImageUrl(imagePath?: string | null) {
   if (imagePath.startsWith("http") || imagePath.startsWith("data:")) {
     return imagePath;
   }
+
   const backendUrl =
     process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:4000";
+
   return `${backendUrl}/uploads/${imagePath}`;
 }
 
-type TeamMember = {
-  id: string;
-  member_type: string;
-  user?: {
-    id: string;
-    name: string;
-    profile_picture: string;
-  };
-};
+function normalizeTeam(rawTeam?: Team | Team[] | null): Team | null {
+  if (!rawTeam) return null;
 
-type Team = {
-  id: string;
-  name: string;
-  created_at: string;
-  created_by: string;
-  team_members: TeamMember[];
-};
+  const team = Array.isArray(rawTeam) ? rawTeam[0] ?? null : rawTeam;
+  if (!team) return null;
+
+  return {
+    ...team,
+    team_members: Array.isArray(team.team_members)
+      ? team.team_members
+      : team.team_members
+      ? [team.team_members]
+      : [],
+  };
+}
+
+function getUserIdFromJwt(token: string | null) {
+  if (!token) return null;
+
+  try {
+    const payload = JSON.parse(window.atob(token.split(".")[1]));
+
+    return (
+      payload.sub ||
+      payload["https://hasura.io/jwt/claims"]?.["x-hasura-user-id"] ||
+      null
+    );
+  } catch (err) {
+    console.error("Failed to decode JWT:", err);
+    return null;
+  }
+}
 
 export default function MyTeamPage() {
   const auth = useAuth();
-  const authData = auth?.getData() as { id?: string };
-  const userId = authData?.id;
+  const [userId, setUserId] = useState<string | null>(null);
+  const [isDropping, setIsDropping] = useState(false);
+  const [dropError, setDropError] = useState("");
 
-  const { data, loading, error } = useQuery<{
-    team_members: { id: string; member_type: string; team: Team }[];
+  useEffect(() => {
+    const authData = auth?.getData?.() as { id?: string } | null;
+    const idFromAuthData = authData?.id ?? null;
+    const idFromJwt = getUserIdFromJwt(auth?.getJwt?.() ?? null);
+
+    setUserId(idFromAuthData || idFromJwt);
+  }, [auth]);
+
+  const hasUserId = Boolean(userId);
+
+  const { data, loading, error, refetch } = useQuery<{
+    team_members: TeamRecord[];
   }>(GET_MY_TEAM, {
-    variables: { userId },
-    skip: !userId,
-    fetchPolicy: "network-only", // <-- always fetch fresh, don't use cache
+    variables: hasUserId ? { userId } : undefined,
+    skip: !hasUserId,
+    fetchPolicy: "network-only",
   });
 
-  console.log("data",data)
+  const team = useMemo(() => {
+    const records = data?.team_members ?? [];
 
-  // const myRecord = data?.team_members?.[0];
-  // const team = myRecord?.team;
-  // const members: TeamMember[] = team?.team_members ?? [];
-  const myRecord = data?.team_members?.[0];
-// Hasura is returning team as an array (misconfigured as array relationship)
-// so we handle both cases defensively
-// const team: Team | null = Array.isArray(myRecord?.team)
-//   ? myRecord.team[0] ?? null
-//   : myRecord?.team ?? null;
+    const personaRecord = records.find((record) => {
+      const normalizedTeam = normalizeTeam(record.team);
+      return Boolean(normalizedTeam?.room_id && normalizedTeam?.persona_id);
+    });
 
+    const selectedRecord = personaRecord ?? records[0];
+    return normalizeTeam(selectedRecord?.team ?? null);
+  }, [data]);
 
-  const rawTeam = Array.isArray(myRecord?.team)
-  ? myRecord.team[0] ?? null
-  : myRecord?.team ?? null;
+  const members: TeamMember[] = Array.isArray(team?.team_members)
+    ? team.team_members
+    : [];
 
-  const team: Team | null = rawTeam
-  ? {
-      ...rawTeam,
-      team_members: Array.isArray(rawTeam.team_members)
-        ? rawTeam.team_members
-        : rawTeam.team_members
-        ? [rawTeam.team_members]  // fallback if still object
-        : [],
+  async function dropPersona() {
+    if (!team?.id) return;
+
+    const confirmed = window.confirm(
+      `Drop ${team.persona_name || team.name}? This will make the persona available again.`
+    );
+
+    if (!confirmed) return;
+
+    setIsDropping(true);
+    setDropError("");
+
+    try {
+      const token = auth.getJwt();
+
+      const res = await fetch("/api/persona-flow/drop", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: token ? `Bearer ${token}` : "",
+        },
+        body: JSON.stringify({
+          teamId: team.id,
+        }),
+      });
+
+      const contentType = res.headers.get("content-type") || "";
+      const responseData = contentType.includes("application/json")
+        ? await res.json()
+        : { error: await res.text() };
+
+      if (!res.ok) {
+        throw new Error(responseData.error || "Failed to drop persona");
+      }
+
+      await refetch();
+    } catch (err: any) {
+      console.error("Drop persona failed:", err);
+      setDropError(err.message || "Failed to drop persona");
+    } finally {
+      setIsDropping(false);
     }
-  : null;
+  }
 
-  console.log("team object:", JSON.stringify(team, null, 2));
-// const members: TeamMember[] = Array.isArray(team?.team_members)
-//   ? team.team_members
-//   : [];
-
-const members: TeamMember[] = team?.team_members ?? [];
-  console.log("myRecord",myRecord)
-  console.log("team",team)
-  console.log("members",members)
-  
-
-  // Loading state
-  if (loading || !userId) {
+  if (!hasUserId) {
     return (
       <main className="relative min-h-screen bg-[#181818] text-white flex items-center justify-center">
         <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]">
-          Loading team data…
+          Loading user identity…
         </p>
       </main>
     );
   }
 
-  // Error state — show full error message to help debug
-  if (error) {
+  if (loading) {
     return (
       <main className="relative min-h-screen bg-[#181818] text-white flex items-center justify-center">
-        <div className="text-center">
+        <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+          Syncing team assignment…
+        </p>
+      </main>
+    );
+  }
+
+  if (error) {
+    return (
+      <main className="relative min-h-screen bg-[#181818] text-white flex items-center justify-center px-5">
+        <div className="max-w-xl text-center">
           <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#ff6a6a]">
             GraphQL Error
           </p>
-          <p className="mt-2 font-mono text-[11px] text-[#929292]">
+          <p className="mt-2 break-words font-mono text-[11px] text-[#929292]">
             {error.message}
           </p>
         </div>
@@ -4082,33 +7833,76 @@ const members: TeamMember[] = team?.team_members ?? [];
             <p className="mt-2 text-[13px] text-[#929292]">
               You are not currently assigned to any team.
             </p>
-            {/* Debug info — remove once working */}
             <p className="mt-4 font-mono text-[10px] text-[#5b5b5b]">
-              user_id: {userId} | team_members returned:{" "}
-              {data?.team_members?.length ?? 0}
+              user_id: {userId} | team_members returned: {data?.team_members?.length ?? 0}
             </p>
           </div>
         ) : (
           <>
-            {/* Team Header */}
             <div className="border border-[#2e2e2e] bg-[#171717] px-6 py-8">
-              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#5b5b5b]">
-                TEAM PROFILE
-              </p>
-              <h1 className="mt-2 font-sans text-[32px] uppercase tracking-[0.04em] text-white">
-                {team.name}
-              </h1>
-              <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">
-                Created{" "}
-                {new Date(team.created_at).toLocaleDateString("en-US", {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                })}
-              </p>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#5b5b5b]">
+                    TEAM PROFILE
+                  </p>
+                  <h1 className="mt-2 font-sans text-[32px] uppercase tracking-[0.04em] text-white">
+                    {team.name}
+                  </h1>
+                  <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+                    Created{" "}
+                    {new Date(team.created_at).toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
+                  </p>
+                </div>
+
+                {team.room_id && team.persona_id && (
+                  <button
+                    type="button"
+                    onClick={dropPersona}
+                    disabled={isDropping}
+                    className="shrink-0 border border-[#ff6a6a]/60 bg-[#181818] px-3 py-2 font-mono text-[9px] uppercase tracking-[0.12em] text-[#ff6a6a] transition-colors hover:bg-[#ff6a6a] hover:text-[#171717] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    {isDropping ? "Dropping..." : "Drop Persona"}
+                  </button>
+                )}
+              </div>
+
+              {team.room_id && team.persona_id && (
+                <div className="mt-5 border-t border-[#2e2e2e] pt-4">
+                  <p className="font-mono text-[10px] uppercase tracking-[0.16em] text-[#ff6a6a]">
+                    Persona Assignment
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+                    <p className="font-sans text-xl uppercase tracking-[0.04em] text-white">
+                      {team.persona_name || team.name}
+                    </p>
+
+                    {team.persona_hex && (
+                      <span
+                        className="h-3 w-3 rounded-full border border-white/20"
+                        style={{ backgroundColor: team.persona_hex }}
+                      />
+                    )}
+                  </div>
+
+                  {team.domain_name && (
+                    <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-[#929292]">
+                      Domain: {team.domain_name}
+                    </p>
+                  )}
+
+                  {dropError && (
+                    <p className="mt-3 font-mono text-[10px] uppercase tracking-[0.12em] text-[#ff6a6a]">
+                      {dropError}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
-            {/* Members List */}
             <div className="border border-[#2e2e2e] bg-[#171717]">
               <div className="border-b border-[#2e2e2e] px-6 py-4 flex items-center justify-between">
                 <h2 className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292]">
@@ -4121,47 +7915,56 @@ const members: TeamMember[] = team?.team_members ?? [];
               </div>
 
               <div className="divide-y divide-[#2e2e2e]">
-                {members.map((member) => {
-                  const isLeader = member.user?.id === team.created_by;
-                  return (
-                    <div
-                      key={member.id}
-                      className="flex items-center justify-between px-6 py-5"
-                    >
-                      <div className="flex items-center gap-4">
-                        {member.user?.profile_picture ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={getImageUrl(member.user.profile_picture)}
-                            alt=""
-                            className="h-12 w-12 border border-[#2e2e2e] object-cover"
-                          />
-                        ) : (
-                          <div className="grid h-12 w-12 place-items-center border border-[#2e2e2e] bg-[#181818] font-mono text-[14px] uppercase tracking-[0.08em] text-[#ff6a6a]">
-                            {getInitials(member.user?.name)}
-                          </div>
-                        )}
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <p className="font-sans text-[18px] uppercase tracking-[0.04em] text-white">
-                              {member.user?.name || "Unknown User"}
+                {members.length === 0 ? (
+                  <div className="px-6 py-5 text-center font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+                    No members found for this team.
+                  </div>
+                ) : (
+                  members.map((member) => {
+                    const isLeader =
+                      member.user?.id === team.created_by ||
+                      member.user?.id === team.leader_id;
+
+                    return (
+                      <div
+                        key={member.id}
+                        className="flex items-center justify-between px-6 py-5"
+                      >
+                        <div className="flex items-center gap-4">
+                          {member.user?.profile_picture ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={getImageUrl(member.user.profile_picture)}
+                              alt=""
+                              className="h-12 w-12 border border-[#2e2e2e] object-cover"
+                            />
+                          ) : (
+                            <div className="grid h-12 w-12 place-items-center border border-[#2e2e2e] bg-[#181818] font-mono text-[14px] uppercase tracking-[0.08em] text-[#ff6a6a]">
+                              {getInitials(member.user?.name)}
+                            </div>
+                          )}
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="font-sans text-[18px] uppercase tracking-[0.04em] text-white">
+                                {member.user?.name || "Unknown User"}
+                              </p>
+                              {isLeader && (
+                                <Crown
+                                  size={14}
+                                  className="text-[#DEF767]"
+                                  aria-label="Team Leader"
+                                />
+                              )}
+                            </div>
+                            <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+                              {isLeader ? "LEADER" : member.member_type || "MEMBER"}
                             </p>
-                            {isLeader && (
-                              <Crown
-                                size={14}
-                                className="text-[#DEF767]"
-                                aria-label="Team Leader"
-                              />
-                            )}
                           </div>
-                          <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">
-                            {isLeader ? "LEADER" : member.member_type || "MEMBER"}
-                          </p>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })
+                )}
               </div>
             </div>
           </>
@@ -4816,8 +8619,9 @@ export default function RegisterPage() {
     // Initialize random default avatar on mount
     useEffect(() => {
         const loadRandomAvatar = async () => {
-            const randomNum = Math.floor(Math.random() * 20) + 1;
+            const randomNum = Math.floor(Math.random() * 19) + 1;
             const imagePath = `/profile_pic/profile_pic${randomNum}.png`;
+            console.log("profile_pic",imagePath)
 
             // Set preview immediately for UX
             setAvatarPreview(imagePath);
@@ -4842,15 +8646,34 @@ export default function RegisterPage() {
     // Handle user uploading their own image
     const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                const base64String = reader.result as string;
-                setAvatarBase64(base64String);
-                setAvatarPreview(base64String); // Update preview to uploaded image
-            };
-            reader.readAsDataURL(file);
+        if (!file) return;
+        if (!file.type.startsWith("image/")) {
+            setError("Please upload a valid image file.");
+            return;
         }
+
+        const reader = new FileReader();
+
+        reader.onloadend = () => {
+            const base64String = reader.result as string;
+            setAvatarBase64(base64String);
+            setAvatarPreview(base64String);
+        };
+
+        reader.onerror = () => {
+            setError("Failed to read selected image.");
+        };
+
+        reader.readAsDataURL(file);
+        // if (file) {
+        //     const reader = new FileReader();
+        //     reader.onloadend = () => {
+        //         const base64String = reader.result as string;
+        //         setAvatarBase64(base64String);
+        //         setAvatarPreview(base64String); // Update preview to uploaded image
+        //     };
+        //     reader.readAsDataURL(file);
+        // }
     };
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -4941,10 +8764,10 @@ export default function RegisterPage() {
                         <h1 className="font-sans text-4xl uppercase tracking-tight text-white mb-3">
                             Join <span className="text-[#ff6a6a]">UXISM</span>
                         </h1>
-                        <p className="font-mono text-[12px] uppercase tracking-[0.2em] text-[#5b5b5b]">Establish your identity in the network.</p>
+                        <p className="font-mono text-[12px] uppercase tracking-[0.2em] text-[#5b5b5b]">Register on to the Uxathon Platform.</p>
                     </div>
 
-                    <form onSubmit={handleSubmit} className="group relative" suppressHydrationWarning>
+                    <form onSubmit={handleSubmit} className="group relative">
                         {/* Unified Slab Construction */}
                         <div className="border border-[#2e2e2e] bg-[#171717] divide-y divide-[#2e2e2e]">
 
@@ -4985,12 +8808,12 @@ export default function RegisterPage() {
                                 </div>
 
                                 <p className="mt-4 font-mono text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b] group-hover/avatar:text-[#DEF767] transition-colors">
-                                    [ Override Visual Identity ]
+                                    [ Click to Upload your Profile Pic ]
                                 </p>
                             </div>
 
                             <RegisterInput label="Full Name" name="name" type="text" placeholder="J. DOE" icon={<UserPlus size={16} />} required />
-                            <RegisterInput label="Email Address" name="email" type="email" placeholder="YOU@DOMAIN.EXT" icon={<Mail size={16} />} required />
+                            <RegisterInput label="Email" name="email" type="email" placeholder="abc@gmail.com" icon={<Mail size={16} />} required />
                             <RegisterInput label="Password" name="password" type="password" placeholder="••••••••" icon={<Lock size={16} />} required />
                             <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-[#2e2e2e]">
                                 <RegisterInput label="Phone Number" name="phone" type="tel" placeholder="987********" icon={<Phone size={16} />} required />
@@ -5102,18 +8925,23 @@ export default function RoomCodePage({ params }: { params: Promise<{ code: strin
     room?.status === 'in_game'
       ? 'Collaborating or competing in real time. Work together to score!'
       : 'Invite other players using the lobby code. Prepare to launch.'
-
+  const shellVariant =
+    room?.game_id === "bidding" && isHost ? "stage" : "default";
   if (loading) {
     return (
-      <GameShell meta="UXISM / MULTIPLAYER / LOADING" title="Syncing..." description="Connecting to signal...">
-        <div className="flex h-48 items-center justify-center">
-          <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#ff6a6a] border-t-transparent"></div>
-          <span className="ml-3 font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292]">
-            Connecting to session...
-          </span>
+      <GameShell
+        meta={`UXISM / ROOM / ${code}`}
+        title="Syncing..."
+        description="Connecting to signal..."
+        variant="default"
+      >
+        <div className="text-center">
+          <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292]">
+            Loading room state...
+          </p>
         </div>
       </GameShell>
-    )
+    );
   }
 
   if (error || !room) {
@@ -5134,6 +8962,102 @@ export default function RoomCodePage({ params }: { params: Promise<{ code: strin
       </GameShell>
     )
   }
+
+
+  const isHostBiddingStage = room.game_id === 'bidding' && isHost
+
+  if (isHostBiddingStage) {
+    return (
+      <main className="relative min-h-screen overflow-x-hidden bg-[#181818] text-white">
+        <div className="pointer-events-none fixed inset-0 opacity-25 [background-image:radial-gradient(#5b5b5b_1px,transparent_1px)] [background-size:18px_18px]" />
+        <div className="pointer-events-none fixed left-4 top-4 z-0 h-5 w-5 border-l border-t border-[#5b5b5b]" />
+        <div className="pointer-events-none fixed right-4 top-4 z-0 h-5 w-5 border-r border-t border-[#5b5b5b]" />
+        <div className="pointer-events-none fixed bottom-4 left-4 z-0 h-5 w-5 border-b border-l border-[#5b5b5b]" />
+        <div className="pointer-events-none fixed bottom-4 right-4 z-0 h-5 w-5 border-b border-r border-[#5b5b5b]" />
+
+        <section className="relative z-10 mx-auto w-full max-w-[1800px] px-4 py-4 sm:px-6 lg:px-8">
+          <GameWrapper
+            room={room}
+            userId={userId}
+            isHost={isHost}
+            gameState={gameState}
+            updateGameState={updateGameState}
+            leaveRoom={leaveRoom}
+          />
+        </section>
+      </main>
+    )
+  }
+  
+
+
+  if (room.status === 'finished') {
+    const personaEnded = room.game_id === 'persona-flow'
+    const canStartBidding = isHost && personaEnded
+
+    async function startBiddingFromFinishedRoom() {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('jwt-token') : null
+
+      const res = await fetch('/api/bidding/start', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          code,
+          startingTokens: 1_000_000,
+          minIncrement: 50_000,
+        }),
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        alert(data.error || 'Failed to start bidding')
+        return
+      }
+
+      window.location.reload()
+    }
+
+    return (
+      <GameShell
+        meta={`UXISM / ROOM / ${code}`}
+        title={personaEnded ? 'Persona Flow Complete' : 'Game Ended'}
+        description={
+          personaEnded
+            ? 'Persona leaders have been created. Continue this same room into Bidding.'
+            : 'The game session has ended.'
+        }
+      >
+        <div className="border border-[#2e2e2e] bg-[#171717]/70 p-6 text-center space-y-4">
+          <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#DEF767]">
+            {personaEnded ? 'Persona Flow has ended.' : 'The game has ended.'}
+          </p>
+
+          <p className="text-[13px] leading-6 text-[#929292]">
+            {personaEnded
+              ? 'Use the same room code to continue into Bidding so the leaders can be detected.'
+              : 'The current room session is complete.'}
+          </p>
+
+          {canStartBidding && (
+            <button
+              type="button"
+              onClick={startBiddingFromFinishedRoom}
+              className="w-full border border-[rgba(222,247,103,0.5)] bg-[#181818] py-3.5 font-mono text-[11px] uppercase tracking-[0.14em] text-[#DEF767]"
+            >
+              Start Bidding in This Room
+            </button>
+          )}
+        </div>
+      </GameShell>
+    )
+  }
+
+
+  
 
   return (
     <GameShell
@@ -7300,8 +11224,6 @@ export interface Persona {
   color_code: string;
   asset_path: string;
   status: PersonaStatus;
-  claimed_by_user_id: string | null;
-  claimed_at?: string | null; // Added to resolve the mockData build error
   description?: string;
   scenario?: string;
   ux_problems?: string;
@@ -7381,6 +11303,7 @@ export const CARD_TYPE_SLOT_MAP: Record<CardType, SlotKey> = {
   CX_PROBLEM: 'CX_PROBLEM',
   AI_PROBLEM: 'AI_PROBLEM',
 };
+
 ```
 
 ---
@@ -9458,8 +13381,8 @@ function GameOrchestrator({ onBack }: { onBack: () => void }) {
     const [isInitializing, setIsInitializing] = useState(true);
 
     const userPayload = getData();
-    const userId = userPayload?.sub;
-
+    // const userId = userPayload?.sub;
+    const userId = userPayload?.sub || (userPayload as any)?.["https://hasura.io/jwt/claims"]?.["x-hasura-user-id"];
     const { data: claimData, loading: claimLoading } = useQuery<{ personas: any[] }>(GET_USER_CLAIM, {
         variables: { userId },
         skip: !userId,
@@ -9472,15 +13395,16 @@ function GameOrchestrator({ onBack }: { onBack: () => void }) {
         }
 
         if (state.gamePhase === "USER_SELECT") {
-            if (userPayload) {
+            if (userPayload && userId) {
             console.log("userPayload in personaGameEvent", userPayload)
             console.log("userPayload.id in personaGameEvent", userPayload.id)
                 dispatch({
                     type: "SET_USER",
                     payload: {
-                        id: userPayload.id || "fuckkk",
-                        username: (userPayload.name as string) || "Authorized Player",
-                        teamName: "UXISM Team"
+                        // id: userPayload.id || "fuckkk",
+                        id: String(userId),
+                        username: (userPayload.name as string) || "Authorized Fuuckk Player",
+                        teamName: "Sololofuckk"
                     }
                 });
                 dispatch({ type: "GO_TO_PHASE", payload: "DOMAIN_SELECT" });
@@ -10104,11 +14028,12 @@ export default function SwipeDeck() {
 ```tsx
 'use client'
 
-import React, { Suspense, useMemo } from 'react'
+import React, { Suspense, useMemo, useState } from 'react'
 import { getGame } from '@/app/games/registry'
 import { GamePanel } from '@/app/games/_components/GameShell'
 import { MultiplayerRoom } from '@/lib/multiplayer/types'
 import { Trophy, Scroll } from 'lucide-react'
+import { PersonaFlowHostMonitor } from '@/components/multiplayer/PersonaFlowHostMonitor'
 
 type GameWrapperProps = {
   room: MultiplayerRoom
@@ -10140,14 +14065,106 @@ export function GameWrapper({
   // Render the registered game component
   const GameComponent = gameDef?.component
 
+
+  const [isEndingGame, setIsEndingGame] = useState(false)
+  const [endGameError, setEndGameError] = useState<string | null>(null)
+
+  async function endCurrentGame() {
+    const confirmed = window.confirm('End the current game for everyone in this room?')
+    if (!confirmed) return
+
+    setIsEndingGame(true)
+    setEndGameError(null)
+
+    try {
+      const token = localStorage.getItem('jwt-token')
+
+      const res = await fetch('/api/multiplayer/end', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          code: room.code,
+          reason: 'Host ended the current game',
+        }),
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to end game')
+      }
+    } catch (err: any) {
+      setEndGameError(err.message || 'Failed to end game')
+    } finally {
+      setIsEndingGame(false)
+    }
+  }
+
+  const [isStartingBidding, setIsStartingBidding] = useState(false)
+  const [biddingError, setBiddingError] = useState<string | null>(null)
+
+  const personaFlowEnded = room.game_id === 'persona-flow' && gameState?.personaFlow?.ended
+
+  async function startBiddingFromPersonaRoom() {
+    setIsStartingBidding(true)
+    setBiddingError(null)
+
+    try {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('jwt-token') : null
+
+      const res = await fetch('/api/bidding/start', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          code: room.code,
+          startingTokens: 1_000_000,
+          minIncrement: 50_000,
+        }),
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to start bidding')
+      }
+    } catch (err: any) {
+      setBiddingError(err.message || 'Failed to start bidding')
+    } finally {
+      setIsStartingBidding(false)
+    }
+  }
+
   return (
     <div className="space-y-6 text-white selection:bg-[#ff6a6a] selection:text-[#171717]">
-      {/* Active Game Header */}
+      {endGameError && (
+        <div className="border border-[#ff6a6a]/40 bg-[#ff6a6a]/10 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[#ff6a6a]">
+          {endGameError}
+        </div>
+      )}
       <div className="flex h-11 items-center justify-between border-b border-[#2e2e2e] px-1">
         <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#ff6a6a] flex items-center gap-2">
           <span className="h-1.5 w-1.5 bg-[#ff6a6a]" />
           SESSION CHANNEL: LIVE RUNNING
         </span>
+        
+        <div className="flex items-center gap-2">
+        {isHost && (
+          <button
+            type="button"
+            onClick={endCurrentGame}
+            disabled={isEndingGame}
+            className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#ff6a6a] hover:text-white active:bg-[#ff6a6a] active:text-[#171717] px-2 py-0.5 transition-colors disabled:opacity-50"
+          >
+            {isEndingGame ? 'Ending...' : 'End Game'}
+          </button>
+        )}
+
         <button
           type="button"
           onClick={leaveRoom}
@@ -10156,11 +14173,46 @@ export function GameWrapper({
           Disconnect
         </button>
       </div>
+      </div>
 
       {/* Main Grid: Game View + Multiplayer HUD */}
       <div className="space-y-6">
-        {/* Dynamic Game Component Display */}
-        {GameComponent ? (
+        {room.game_id === 'persona-flow' && isHost ? (
+        <div className="space-y-4">
+          <PersonaFlowHostMonitor room={room} />
+
+          {personaFlowEnded && (
+            <GamePanel className="space-y-4 text-center">
+              <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#5b5b5b]">
+                Persona Flow Complete
+              </p>
+
+              <h3 className="font-sans text-2xl uppercase tracking-[0.04em] text-white">
+                Start Bidding in Same Room
+              </h3>
+
+              <p className="mx-auto max-w-[42ch] text-[12px] leading-5 text-[#929292]">
+                Leaders and teams were created in this room. Continue with the same room code so bidding can detect those leaders.
+              </p>
+
+              {biddingError && (
+                <div className="border border-[#ff6a6a]/40 bg-[#ff6a6a]/10 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[#ff6a6a]">
+                  {biddingError}
+                </div>
+              )}
+
+              <button
+                type="button"
+                disabled={isStartingBidding}
+                onClick={startBiddingFromPersonaRoom}
+                className="w-full border border-[rgba(222,247,103,0.5)] bg-[#181818] py-3.5 font-mono text-[11px] uppercase tracking-[0.14em] text-[#DEF767] disabled:opacity-50"
+              >
+                {isStartingBidding ? 'Starting Bidding...' : 'Start Bidding Game'}
+              </button>
+            </GamePanel>
+          )}
+        </div>
+      ) : GameComponent ? (
           <GamePanel className="relative">
             <Suspense
               fallback={
@@ -10379,7 +14431,8 @@ export function Lobby({ room, userId, isHost, isWS, onStart, onLeave }: LobbyPro
             SYNCED PLAYER NODES
           </p>
           <span className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b]">
-            {room.room_players.length} / {room.max_players || 8} CONNECTED
+            // {room.room_players.length} / {room.max_players || 8} CONNECTED
+            {room.room_players.length} / {room.max_players ?? '∞'} CONNECTED
           </span>
         </div>
 
@@ -10487,107 +14540,408 @@ export function Lobby({ room, userId, isHost, isWS, onStart, onLeave }: LobbyPro
 
 ---
 
+### File: `components/multiplayer/PersonaFlowHostMonitor.tsx`
+
+```tsx
+'use client'
+
+import { MultiplayerRoom } from '@/lib/multiplayer/types'
+import { Trophy, Users, Layers } from 'lucide-react'
+
+type Props = {
+  room: MultiplayerRoom
+}
+
+export function PersonaFlowHostMonitor({ room }: Props) {
+  const claims = room.room_persona_claims || []
+  const totalPersonas = 20
+  // const remaining = Math.max(totalPersonas - claims.length, 0)
+  const ended = claims.length >= totalPersonas || room.status === 'finished'
+
+  const claimedCount = claims.length
+  const remaining = Math.max(totalPersonas - claimedCount, 0)
+
+
+  console.log('[Host Monitor Claims]', {
+  roomId: room.id,
+  claims: room.room_persona_claims,
+  count: room.room_persona_claims?.length,
+})
+
+  
+  return (
+    <div className="space-y-6">
+      <div className="border border-[#2e2e2e] bg-[#171717]/70 p-6">
+        <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#5b5b5b]">
+          HOST OBSERVER MODE
+        </p>
+
+        <h2 className="mt-2 font-sans text-3xl uppercase tracking-[0.04em] text-white">
+          Persona Flow Live Board
+        </h2>
+
+        <p className="mt-3 text-[13px] leading-6 text-[#929292]">
+          You are hosting this game. Players are racing for personas; you can watch claims, domains,
+          and final team assignment in real time.
+        </p>
+
+        <div className="mt-6 grid grid-cols-3 gap-px border border-[#2e2e2e] bg-[#2e2e2e]">
+          <div className="bg-[#181818] p-4">
+            <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b]">Players</p>
+            <p className="mt-1 font-sans text-2xl text-white">{room.room_players.length}</p>
+          </div>
+
+          <div className="bg-[#181818] p-4">
+            <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b]">Claimed</p>
+            <p className="mt-1 font-sans text-2xl text-[#DEF767]">{claimedCount}</p>
+          </div>
+
+          <div className="bg-[#181818] p-4">
+            <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b]">Remaining</p>
+            <p className="mt-1 font-sans text-2xl text-[#ff6a6a]">{remaining}</p>
+          </div>
+        </div>
+
+        {ended && (
+          <div className="mt-6 border border-[#DEF767]/40 bg-[#DEF767]/10 p-4 font-mono text-[11px] uppercase tracking-[0.14em] text-[#DEF767]">
+            The game has ended. All 20 personas have been assigned.
+          </div>
+        )}
+      </div>
+
+      <div>
+        <div className="flex h-11 items-center justify-between border-b border-[#2e2e2e] px-1">
+          <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#929292] flex items-center gap-2">
+            <Trophy size={12} className="text-[#DEF767]" />
+            Live Persona Claims
+          </p>
+        </div>
+
+        <div className="mt-2 flex flex-col">
+          {claims.length === 0 ? (
+            <div className="border border-[#2e2e2e] bg-[#171717]/70 p-6 text-center font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+              No claims yet.
+            </div>
+          ) : (
+            claims.map((claim, index) => (
+              <div
+                key={claim.id}
+                className="grid gap-3 border border-[#2e2e2e] bg-[#171717]/70 p-4 -mt-[1px] md:grid-cols-[40px_1fr_1fr_1fr]"
+              >
+                <div className="font-mono text-[11px] text-[#5b5b5b]">
+                  #{String(index + 1).padStart(2, '0')}
+                </div>
+
+                <div>
+                  <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b] flex items-center gap-2">
+                    <Users size={10} />
+                    Player
+                  </p>
+                  <p className="mt-1 font-sans text-[14px] uppercase text-white">
+                    {claim.user?.name || claim.user_id.slice(0, 8)}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b] flex items-center gap-2">
+                    <Layers size={10} />
+                    Domain
+                  </p>
+                  <p className="mt-1 font-sans text-[14px] uppercase text-white">
+                    {claim.domain_name}
+                  </p>
+                </div>
+
+                <div>
+                  <p className="font-mono text-[9px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+                    Persona
+                  </p>
+                  <div className="mt-1 inline-flex items-center gap-2">
+                    <span
+                      className="h-3 w-3 rounded-full"
+                      style={{ backgroundColor: claim.persona_hex }}
+                    />
+                    <span className="font-sans text-[14px] uppercase text-white">
+                      {claim.persona_name}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+```
+
+---
+
 ### File: `components/onboarding/DomainSelect/DomainSelect.module.css`
 
 ```css
 .container {
+  /* Self-contained UXISM tokens */
+  --base-bg: #181818;
+  --deep-bg: #171717;
+  --border: #2e2e2e;
+  --muted: #5b5b5b;
+  --secondary: #929292;
+  --primary: #ffffff;
+  --lime: #DEF767;
+  --coral: #ff6a6a;
+
+  --font-body: 'Onest', 'Cygre', sans-serif;
+  --font-mono: 'Geist Mono', monospace;
+  --font-display: 'Onest', 'Cygre', sans-serif;
+
+  width: 100%;
+  max-width: 896px;
+  /* max-w-4xl */
+  margin: 0 auto;
+  padding: 40px 24px 80px;
   position: relative;
   z-index: 2;
-  padding: 40px 20px;
-  min-height: 100svh;
-}
-.header {
-  margin-bottom: 32px;
-}
-.backButton {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  text-decoration: none;
-  transition: color 0.15s ease;
-}
-.backButton:hover {
-  color: var(--coral);
-}
-.eyebrow {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--muted);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  margin-bottom: 20px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.player { color: var(--coral); }
-.sep    { color: var(--border); }
-.heading {
-  font-family: var(--font-display);
-  font-size: clamp(22px, 5vw, 36px);
-  color: var(--primary);
-  margin-bottom: 8px;
-}
-.sub {
-  font-size: 11px;
-  color: var(--secondary);
-  margin-bottom: 32px;
-}
-.grid {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 10px;
-}
-@media (min-width: 480px) {
-  .grid { grid-template-columns: repeat(3, 1fr); }
-}
-.card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 24px 20px 20px;
-  background: var(--deep-bg);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  cursor: pointer;
-  transition: border-color 0.15s ease;
-  text-align: left;
-  color: var(--primary);
-  -webkit-tap-highlight-color: transparent;
-}
-.card:active, .card:hover { border-color: var(--secondary); }
-.card:active .badge, .card:hover .badge { color: var(--coral); }
-.icon {
-  font-size: 18px;
-  color: var(--muted);
-  font-family: var(--font-mono);
-}
-.name {
-  font-family: var(--font-display);
-  font-size: 16px;
-  color: var(--primary);
-}
-.desc {
-  font-size: 10px;
-  color: var(--secondary);
-  line-height: 1.4;
-}
-.badge {
-  margin-top: 8px;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  color: var(--muted);
-  transition: color 0.12s;
 }
 
+.container::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.25;
+  background-image: radial-gradient(var(--muted) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+@media (min-width: 640px) {
+  .container {
+    padding: 40px 48px 80px;
+    /* matches px-6 sm:px-12 of the event hub */
+  }
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.player {
+  color: var(--coral);
+}
+
+.sep {
+  color: var(--border);
+}
+
+.heading {
+  font-family: var(--font-display);
+  font-size: clamp(2.5rem, 8vw, 4rem);
+  text-transform: uppercase;
+  font-weight: normal;
+  line-height: 0.9;
+  letter-spacing: -0.02em;
+  color: var(--primary);
+  margin-bottom: 24px;
+}
+
+.accent {
+  color: var(--lime);
+}
+
+.sub {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--secondary);
+  line-height: 1.6;
+  max-width: 45ch;
+  margin-bottom: 48px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  aspect-ratio: 1 / 1;
+  width: 100%;
+  padding: 24px;
+  background: var(--deep-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.3s ease, background-color 0.3s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (max-width: 640px) {
+  .card {
+    aspect-ratio: auto;
+    min-height: 160px;
+    gap: 16px;
+  }
+}
+
+.card:hover {
+  border-color: var(--lime);
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.iconBox {
+  height: 40px;
+  width: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--base-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  transition: border-color 0.3s ease;
+}
+
+.card:hover .iconBox {
+  border-color: rgba(222, 247, 103, 0.5);
+}
+
+.icon {
+  font-size: 20px;
+  color: var(--lime);
+}
+
+.tag {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--muted);
+}
+
+.cardBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  justify-content: center;
+  margin-top: 12px;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 640px) {
+  .cardBody {
+    margin: 0;
+  }
+}
+
+.name {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: normal;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--primary);
+  transition: color 0.3s ease;
+  line-height: 1.2;
+}
+
+.card:hover .name {
+  color: var(--lime);
+}
+
+.desc {
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--secondary);
+  line-height: 1.5;
+  text-align: left;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.cardFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.playBtn {
+  height: 32px;
+  width: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--muted);
+  color: var(--muted);
+  background: transparent;
+  transition: all 0.3s ease;
+}
+
+.card:hover .playBtn {
+  border-color: var(--lime);
+  background-color: var(--lime);
+  color: var(--deep-bg);
+}
+
+.accentBar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background-color: var(--lime);
+  transform: scaleY(0);
+  transform-origin: top;
+  transition: transform 0.5s ease;
+}
+
+.card:hover .accentBar {
+  transform: scaleY(1);
+}
+
+.cardLogo {
+  height: 18px;
+  width: auto;
+  opacity: 0.35;
+  filter: invert(1);
+  transition: opacity 0.3s ease;
+}
+
+.card:hover .cardLogo {
+  opacity: 0.75;
+}
 ```
 
 ---
@@ -10600,6 +14954,7 @@ import { useGame } from '@/store/gameStore';
 import { MOCK_DOMAINS } from '@/data/mockData';
 import { Domain } from '@/types';
 import styles from './DomainSelect.module.css';
+import { Play } from 'lucide-react';
 
 export default function DomainSelect() {
   const { state, dispatch } = useGame();
@@ -10611,14 +14966,17 @@ export default function DomainSelect() {
   return (
     <div className={styles.container}>
       <div className={styles.eyebrow}>
+        <span>Playing · </span>
         <span className={styles.player}>{state.currentUser?.username}</span>
-        <span className={styles.sep}>/</span>
-        <span>01 · DOMAIN</span>
       </div>
-      <h1 className={styles.heading}>Select Domain</h1>
-      <p className={styles.sub}>Choose your industry arena to begin.</p>
+      <h1 className={styles.heading}>
+        Select <span className={styles.accent}>Domain</span>
+      </h1>
+      {/* <p className={styles.sub}>Choose your Domain to begin.</p> */}
+
       <div className={styles.grid}>
-        {MOCK_DOMAINS.map(d => {
+        {MOCK_DOMAINS.map((d, index) => {
+          const domainTag = `D-${(index + 1).toString().padStart(2, '0')}`;
           return (
             <button
               key={d.id}
@@ -10627,10 +14985,28 @@ export default function DomainSelect() {
               onClick={() => pick(d)}
               aria-label={`Select ${d.name} domain`}
             >
-              <span className={styles.icon} aria-hidden="true">{d.icon}</span>
-              <span className={styles.name}>{d.name}</span>
-              <span className={styles.desc}>{d.description}</span>
-              <span className={styles.badge} aria-hidden="true">SELECT →</span>
+              {/* Top Row: Icon & Name */}
+              <div className={styles.cardHeader}>
+                <div className={styles.iconBox}>
+                  <span className={styles.icon}>{d.icon}</span>
+                </div>
+                <h3 className={styles.name}>{d.name}</h3>
+              </div>
+
+              {/* Middle Section: Description */}
+              <div className={styles.cardBody}>
+                <p className={styles.desc}>{d.description}</p>
+              </div>
+
+              {/* Bottom Row: Play Button & Logo */}
+              {/* <div className={styles.cardFooter}>
+                <div className={styles.playBtn}>
+                  <Play size={12} fill="currentColor" />
+                </div>
+              </div> */}
+
+              {/* Hover Accent Bar */}
+              <div className={styles.accentBar} />
             </button>
           );
         })}
@@ -10648,23 +15024,57 @@ export default function DomainSelect() {
 
 ```css
 .container {
+  /* Self-contained UXISM tokens */
+  --base-bg: #181818;
+  --deep-bg: #171717;
+  --border: #2e2e2e;
+  --muted: #5b5b5b;
+  --secondary: #929292;
+  --primary: #ffffff;
+  --lime: #DEF767;
+  --coral: #ff6a6a;
+
+  --font-body: 'Onest', 'Cygre', sans-serif;
+  --font-mono: 'Geist Mono', monospace;
+  --font-display: 'Onest', 'Cygre', sans-serif;
+
+  width: 100%;
+  max-width: 896px;
+  /* max-w-4xl */
+  margin: 0 auto;
+  padding: 40px 24px 80px;
   position: relative;
   z-index: 2;
-  padding: 40px 20px;
-  min-height: 100svh;
+}
+
+.container::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.25;
+  background-image: radial-gradient(var(--muted) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+@media (min-width: 640px) {
+  .container {
+    padding: 40px 48px 80px;
+    /* matches px-6 sm:px-12 of the event hub */
+  }
 }
 
 .eyebrow {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10px;
   color: var(--muted);
-  letter-spacing: 0.1em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .domain {
@@ -10677,19 +15087,22 @@ export default function DomainSelect() {
 
 .heading {
   font-family: var(--font-display);
-  font-size: clamp(24px, 7vw, 44px);
+  font-size: clamp(2.5rem, 8vw, 4rem);
+  text-transform: uppercase;
+  font-weight: normal;
+  line-height: 0.9;
+  letter-spacing: -0.02em;
   color: var(--primary);
-  margin-bottom: 8px;
+  margin-bottom: 24px;
 }
 
 .sub {
+  font-family: var(--font-body);
   font-size: 13px;
   color: var(--secondary);
-  margin-bottom: 4px;
-}
-
-.hint {
-  color: var(--muted);
+  line-height: 1.6;
+  max-width: 45ch;
+  margin-bottom: 48px;
 }
 
 .grid {
@@ -10697,88 +15110,82 @@ export default function DomainSelect() {
   grid-template-columns: repeat(2, 1fr);
   gap: 16px;
   margin-top: 32px;
+  width: 100%;
 }
 
-@media (min-width: 600px) {
+@media (min-width: 640px) {
   .grid {
     grid-template-columns: repeat(4, 1fr);
     gap: 20px;
   }
 }
 
-@media (min-width: 900px) {
-  .grid {
-    grid-template-columns: repeat(5, 1fr);
-    gap: 24px;
-  }
-}
-
 .personaCard {
   position: relative;
   aspect-ratio: 3 / 4;
-  border-radius: 24px;
-  border: none;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.15);
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 12px;
+  justify-content: space-between;
   cursor: pointer;
-  transition: transform 0.2s, filter 0.2s;
+  transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), box-shadow 0.3s ease;
   padding: 24px 16px;
   overflow: hidden;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .personaCard:hover:not(.claimed) {
-  transform: translateY(-8px);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
-  border-color: rgba(255, 255, 255, 0.3);
+  transform: translateY(-6px);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.3);
+  border-color: rgba(255, 255, 255, 0.4);
 }
 
 .personaCard:active:not(.claimed) {
-  transform: scale(0.95) translateY(-4px);
+  transform: scale(0.97) translateY(-3px);
 }
 
 .personaCard.claimed {
   cursor: not-allowed;
-  filter: grayscale(0.5);
-  opacity: 0.6;
+  filter: grayscale(0.8);
+  opacity: 0.5;
 }
 
 .assetContainer {
   flex: 1;
+  width: 110%;
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
+  margin-bottom: 12px;
   z-index: 2;
-  margin-bottom: 8px;
-  width: 100%;
 }
 
 .asset {
-  width: 200%;
-  height: auto;
-  z-index: 2;
-  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-  filter: drop-shadow(0 10px 20px rgba(0, 0, 0, 0.15));
+  height: 100%;
+  width: auto;
+  object-fit: contain;
+  transition: transform 0.3s ease;
+  filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.15));
 }
 
-.personaCard:hover .asset {
-  transform: scale(1.1);
+.personaCard:hover:not(.claimed) .asset {
+  transform: scale(1.08);
 }
 
 .cardName {
   font-family: var(--font-display);
   font-size: 15px;
-  line-height: 1.1;
-  color: #000;
+  line-height: 1.2;
+  color: #000000;
   font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: -0.02em;
+  letter-spacing: 0.04em;
   z-index: 2;
-  text-shadow: none;
   text-align: center;
+  margin-top: auto;
 }
 
 .claimedOverlay {
@@ -10787,8 +15194,8 @@ export default function DomainSelect() {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(2px);
+  background: rgba(24, 24, 24, 0.75);
+  backdrop-filter: blur(3px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -10796,77 +15203,47 @@ export default function DomainSelect() {
 }
 
 .claimedStamp {
-  border: 2px solid #ef5350;
-  color: #ef5350;
-  padding: 4px 12px;
+  border: 1px solid var(--coral);
+  color: var(--coral);
+  padding: 6px 14px;
   font-family: var(--font-mono);
-  font-weight: 900;
-  font-size: 12px;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  transform: rotate(-15deg);
-  border-radius: 4px;
-  box-shadow: 0 0 10px rgba(239, 83, 80, 0.4);
-}
-
-/* Scanner Loading Screen */
-.scannerOverlay {
-  position: fixed;
-  inset: 0;
-  background: #181818;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  overflow: hidden;
-}
-
-.scanLine {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, #DEF767, transparent);
-  box-shadow: 0 0 20px #DEF767;
-  animation: scan 3s linear infinite;
-  opacity: 0.5;
-  z-index: 1;
-}
-
-@keyframes scan {
-  0% { top: 0; }
-  100% { top: 100%; }
-}
-
-.technicalInfo {
-  text-align: center;
-  z-index: 2;
-  max-width: 80%;
-}
-
-.flicker {
-  font-family: var(--font-mono);
+  font-weight: normal;
   font-size: 10px;
-  color: #DEF767;
-  letter-spacing: 0.3em;
-  animation: flicker 0.5s infinite alternate;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  transform: rotate(-10deg);
 }
 
-@keyframes flicker {
-  0% { opacity: 1; }
-  50% { opacity: 0.4; }
-  100% { opacity: 0.8; }
+.empty {
+  text-align: center;
+  padding: 40px;
+  border: 1px dashed var(--border);
+  width: 100%;
+  grid-column: 1 / -1;
 }
 
-.coordinates {
+.empty p {
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--secondary);
+  margin-bottom: 16px;
+}
+
+.empty button {
+  border: 1px solid var(--border);
+  background: transparent;
+  padding: 8px 16px;
   font-family: var(--font-mono);
-  font-size: 9px;
-  color: #5b5b5b;
-  letter-spacing: 0.2em;
-  margin-top: 12px;
-  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--primary);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.empty button:hover {
+  border-color: var(--lime);
+  color: var(--lime);
 }
 
 /* Header & Back Button */
@@ -10877,11 +15254,11 @@ export default function DomainSelect() {
 .backButton {
   background: none;
   border: none;
-  color: #929292;
+  color: var(--secondary);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.18em;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -10891,7 +15268,22 @@ export default function DomainSelect() {
 }
 
 .backButton:hover {
-  color: #DEF767;
+  color: var(--lime);
+}
+
+.cardLogo {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  height: 30px;
+  width: auto;
+  opacity: 0.30;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.personaCard:hover:not(.claimed) .cardLogo {
+  opacity: 0.55;
 }
 ```
 
@@ -10961,6 +15353,14 @@ export default function PersonaSelect() {
 
   return (
     <div className={styles.container}>
+      <div className={styles.header}>
+        <button
+          className={styles.backButton}
+          onClick={() => dispatch({ type: 'GO_TO_PHASE', payload: 'DOMAIN_SELECT' })}
+        >
+          <span>←</span> Back to Domains
+        </button>
+      </div>
       <div className={styles.eyebrow}>
         <span>{state.currentUser?.username}</span>
         <span className={styles.sep}>/</span>
@@ -10996,6 +15396,9 @@ export default function PersonaSelect() {
                 <img src={p.asset_path} alt="" className={styles.asset} />
               </div>
               <span className={styles.cardName}>{p.name}</span>
+              {/* Card Bottom Logo */}
+              <img src="/assets/logos/placeholder.svg" alt="" className={styles.cardLogo} />
+              
               {p.status === 'CLAIMED' && (
                 <div className={styles.claimedOverlay}>
                   <span className={styles.claimedStamp}>CLAIMED</span>
@@ -11901,13 +16304,14 @@ export default function PersonaTakenScreen() {
           </p>
         )}
 
-        <p className={styles.sub}>Choose a different persona and keep racing.</p>
+        <p className={styles.sub}>Select another domain or persona.</p>
 
         <div className={styles.actions}>
           <button
             id="taken-pick-another"
+            type="button"
             className={styles.primaryBtn}
-            onClick={() => dispatch({ type: 'GO_TO_PHASE', payload: 'PERSONA_SELECT' })}
+            onClick={() => dispatch({ type: 'PICK_ANOTHER_PERSONA' })}
           >
             Pick Another Persona
           </button>
@@ -12051,6 +16455,35 @@ import { CREATE_TEAM, ADD_TEAM_MEMBER } from '@/lib/GameRules/game-queries';
 import styles from './WinScreen.module.css';
 
 
+
+
+type CreateTeamData = {
+  insert_teams_one: {
+    id: string;
+    color: string;
+    created_by: string;
+  } | null;
+};
+
+type CreateTeamVariables = {
+  name: string;
+  color: string;
+  userId: string;
+};
+
+type AddTeamMemberData = {
+  insert_team_members_one: {
+    id: string;
+  } | null;
+};
+
+type AddTeamMemberVariables = {
+  teamId: string;
+  userId: string;
+  memberType: string;
+};
+
+
 type WinScreenProps = {
   userId?: string;
 };
@@ -12060,66 +16493,135 @@ export default function WinScreen({ userId }: WinScreenProps) {
   const { selectedPersona, currentUser } = state;
   const [claimStatus, setClaimStatus] = useState<'VERIFYING' | 'WON' | 'LOST'>('VERIFYING');
 
-  const [createTeam] = useMutation(CREATE_TEAM);
-  const [addTeamMember] = useMutation(ADD_TEAM_MEMBER);
+  // const [createTeam] = useMutation<CreateTeamData, CreateTeamVariables>(CREATE_TEAM);
+  // const [addTeamMember] = useMutation<AddTeamMemberData, AddTeamMemberVariables>(ADD_TEAM_MEMBER);
+  // ---------------------------------------------------
+
+  
+  // const [createTeam] = useMutation(CREATE_TEAM);
+  // const [addTeamMember] = useMutation(ADD_TEAM_MEMBER);
   // const [claimPersona, ] = useMutation(CREATE_TEAM_ATOMIC);
   // const [createTeam] = useMutation(CREATE_TEAM_ATOMIC_V2);
   const claimAttempted = useRef(false);
+  
+//   useEffect(() => {
+//   async function verifyWin() {
+//     if (!selectedPersona || !currentUser || !userId || claimAttempted.current) return;
+//     claimAttempted.current = true;
+
+//     try {
+//       // Step 1: Create the team
+//       const { data: teamData } = await createTeam({
+//         variables: {
+//           name: `${selectedPersona.name} Squad`,
+//           color: selectedPersona.color_code,
+//           userId,
+//         },
+//       });
+
+//       const newTeamId = teamData?.insert_teams_one?.id;
+//       if (!newTeamId) throw new Error("Team creation returned no ID");
+
+//       // Step 2: Add the leader as a team_member
+//       await addTeamMember({
+//         variables: {
+//           teamId: newTeamId,
+//           userId,
+//           memberType: "LEADER",
+//         },
+//       });
+
+//       setClaimStatus("WON");
+//       fireConfetti();
+
+//     } catch (err: any) {
+//       console.error("Failed to verify claim:", err);
+
+//       const errorString = JSON.stringify(err);
+
+//       // Already created a team (duplicate request)
+//       if (errorString.includes("teams_leader_id_key") || 
+//           errorString.includes("teams_created_by_key")) {
+//         setClaimStatus("WON");
+//         fireConfetti();
+//         return;
+//       }
+
+//       // Someone took this color
+//       setClaimStatus("LOST");
+//       setTimeout(() => {
+//         dispatch({ type: "PERSONA_TAKEN_BY", payload: "Another player" });
+//       }, 1500);
+//     }
+//   }
+
+//   verifyWin();
+// }, [createTeam, addTeamMember, selectedPersona, currentUser, userId, dispatch]);
+
   useEffect(() => {
-  async function verifyWin() {
-    if (!selectedPersona || !currentUser || !userId || claimAttempted.current) return;
-    claimAttempted.current = true;
+    async function verifyWin() {
+      if (!selectedPersona || !state.selectedDomain || !currentUser || !userId || claimAttempted.current) return;
+      claimAttempted.current = true;
 
-    try {
-      // Step 1: Create the team
-      const { data: teamData } = await createTeam({
-        variables: {
-          name: `${selectedPersona.name} Squad`,
-          color: selectedPersona.color_code,
-          userId,
-        },
-      });
+      const roomCode = localStorage.getItem('active-room-code');
+      const token = localStorage.getItem('jwt-token');
 
-      const newTeamId = teamData?.insert_teams_one?.id;
-      if (!newTeamId) throw new Error("Team creation returned no ID");
-
-      // Step 2: Add the leader as a team_member
-      await addTeamMember({
-        variables: {
-          teamId: newTeamId,
-          userId,
-          memberType: "LEADER",
-        },
-      });
-
-      setClaimStatus("WON");
-      fireConfetti();
-
-    } catch (err: any) {
-      console.error("Failed to verify claim:", err);
-
-      const errorString = JSON.stringify(err);
-
-      // Already created a team (duplicate request)
-      if (errorString.includes("teams_leader_id_key") || 
-          errorString.includes("teams_created_by_key")) {
-        setClaimStatus("WON");
-        fireConfetti();
+      if (!roomCode || !token) {
+        setClaimStatus("LOST");
         return;
       }
 
-      // Someone took this color
-      setClaimStatus("LOST");
-      setTimeout(() => {
-        dispatch({ type: "PERSONA_TAKEN_BY", payload: "Another player" });
-      }, 1500);
+      try {
+        const res = await fetch('/api/persona-flow/claim', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            code: roomCode,
+            domain: {
+              id: state.selectedDomain.id,
+              name: state.selectedDomain.name,
+              description: state.selectedDomain.description,
+              icon: state.selectedDomain.icon,
+            },
+            persona: {
+              id: selectedPersona.id,
+              name: selectedPersona.name,
+              color_code: selectedPersona.color_code,
+              asset_path: selectedPersona.asset_path,
+            },
+          }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok || !data.won) {
+          setClaimStatus("LOST");
+          setTimeout(() => {
+            dispatch({
+              type: "PERSONA_TAKEN_BY",
+              payload: data.takenBy || "Another player",
+            });
+          }, 1000);
+          return;
+        }
+
+        setClaimStatus("WON");
+        fireConfetti();
+
+        if (data.gameEnded) {
+          alert("The game has ended");
+        }
+      } catch (err) {
+        console.error("Failed to verify claim:", err);
+        setClaimStatus("LOST");
+      }
     }
-  }
 
-  verifyWin();
-}, [createTeam, addTeamMember, selectedPersona, currentUser, userId, dispatch]);
-
-
+    verifyWin();
+  }, [selectedPersona, state.selectedDomain, currentUser, userId, dispatch]);
 
 
 
@@ -12561,7 +17063,18 @@ export function useAuth() {
 // Fully self-contained mock dataset — no Hasura/DB required for the MVP demo.
 
 import { Domain, Persona, Card, User } from '@/app/x/types/index';
-
+import {
+  HeartPulse,
+  GraduationCap,
+  Landmark,
+  ShoppingCart,
+  TrainFront, // or Truck / Bus
+  Sprout, // or Tractor
+  Store,
+  Plane, // or MapPin
+  Scale, // or Building2
+  Clapperboard
+} from 'lucide-react';
 export const MOCK_USERS: User[] = [
   { id: 'u1', username: 'PlayerOne', teamName: 'Alpha Squad', teamMembers: ['Alice', 'Bob', 'Charlie'] },
   { id: 'u2', username: 'NeonRacer', teamName: 'Cyber Punks', teamMembers: ['Dave', 'Eve', 'Frank'] },
@@ -12569,12 +17082,32 @@ export const MOCK_USERS: User[] = [
   { id: 'u4', username: 'DataPilot', teamName: 'NeuroNet', teamMembers: ['Jack', 'Karl', 'Liam'] },
 ];
 
+// export const MOCK_DOMAINS: Domain[] = [
+//   { id: 'd1', name: 'Health Care Sector', icon: '◈', description: 'Delivering quality healthcare services to improve patient outcomes and wellbeing.' },
+//   { id: 'd2', name: 'Education Sector', icon: '⊕', description: 'Empowering learners through accessible, engaging, and effective educational experiences.' },
+//   { id: 'd3', name: 'Banking & Finance Sector', icon: '⊙', description: 'Managing financial transactions securely while enabling economic growth opportunities.' },
+//   { id: 'd4', name: 'E-Commerce Sector', icon: '🎮', description: 'Providing convenient online shopping experiences with seamless digital transactions.' },
+//   { id: 'd5', name: 'Transportation & Mobility Sector', icon: '🎮', description: 'Enabling efficient movement of people and goods across regions.' },
+//   { id: 'd6', name: 'Agriculture Sector', icon: '🎮', description: 'Enhancing crop production through sustainable farming practices and innovation.' },
+//   { id: 'd7', name: 'Retail Sector', icon: '🎮', description: 'Connecting customers with products through personalized shopping experiences daily.' },
+//   { id: 'd8', name: 'Travel & Hospitality Sector', icon: '🎮', description: 'Creating exceptional travel experiences and comfortable hospitality services worldwide.' },
+//   { id: 'd9', name: 'Government & Public Service Sector', icon: '🎮', description: 'Delivering public services efficiently while promoting transparency and accountability.' },
+//   { id: 'd10', name: 'Media & Entertainment Sector', icon: '🎮', description: 'Engaging audiences with creative content across diverse digital platforms.' },
+// ];
+
 export const MOCK_DOMAINS: Domain[] = [
-  { id: 'd1', name: 'FinTech', icon: '◈', description: 'Payments, trading, compliance & wealth management' },
-  { id: 'd2', name: 'HealthTech', icon: '⊕', description: 'Clinical workflows, diagnostics, & patient care' },
-  { id: 'd3', name: 'AI Tech', icon: '⊙', description: 'Model training, ethics, & intelligent agents' },
-  { id: 'd4', name: 'GameDev', icon: '🎮', description: 'Mechanics, rendering, & player experience' },
+  { id: 'd1', name: 'Health Care Sector', icon: '✚', description: 'Delivering quality healthcare services to improve patient outcomes and wellbeing.' }, // Heavy cross
+  { id: 'd2', name: 'Education Sector', icon: '✎', description: 'Empowering learners through accessible, engaging, and effective educational experiences.' }, // Pencil
+  { id: 'd3', name: 'Banking & Finance Sector', icon: '⛃', description: 'Managing financial transactions securely while enabling economic growth opportunities.' }, // Coin stack / Database
+  { id: 'd4', name: 'E-Commerce Sector', icon: '⊞', description: 'Providing convenient online shopping experiences with seamless digital transactions.' }, // Digital grid / Window
+  { id: 'd5', name: 'Transportation & Mobility Sector', icon: '⇄', description: 'Enabling efficient movement of people and goods across regions.' }, // Movement arrows
+  { id: 'd6', name: 'Agriculture Sector', icon: '⚘', description: 'Enhancing crop production through sustainable farming practices and innovation.' }, // Plant symbol
+  { id: 'd7', name: 'Retail Sector', icon: '⌂', description: 'Connecting customers with products through personalized shopping experiences daily.' }, // Storefront / Building
+  { id: 'd8', name: 'Travel & Hospitality Sector', icon: '⛯', description: 'Creating exceptional travel experiences and comfortable hospitality services worldwide.' }, // Map marker / Compass
+  { id: 'd9', name: 'Government & Public Service Sector', icon: '🏛', description: 'Delivering public services efficiently while promoting transparency and accountability.' }, // Scales
+  { id: 'd10', name: 'Media & Entertainment Sector', icon: '▷', description: 'Engaging audiences with creative content across diverse digital platforms.' }  // Play button
 ];
+
 
 export const MOCK_PERSONAS: Persona[] = [
   {
@@ -12595,7 +17128,7 @@ export const MOCK_PERSONAS: Persona[] = [
   },
   {
     id: "p02",
-    name: "Rohit",
+    name: "Rohit Malhotra",
     domain_id: "d1",
     color_code: "#CADB2B",
     asset_path: "/assets/avatars/Rohit.svg",
@@ -12612,7 +17145,7 @@ export const MOCK_PERSONAS: Persona[] = [
   {
     id: "p03",
     name: "Kavya",
-    domain_id: "d1",
+    domain_id: "d2",
     color_code: "#72AC22",
     asset_path: "/assets/avatars/Kavya.svg",
     status: "AVAILABLE",
@@ -12628,7 +17161,7 @@ export const MOCK_PERSONAS: Persona[] = [
   {
     id: "p04",
     name: "Dr. Meera",
-    domain_id: "d1",
+    domain_id: "d2",
     color_code: "#4BB059",
     asset_path: "/assets/avatars/DrMeera.svg",
     status: "AVAILABLE",
@@ -12643,8 +17176,8 @@ export const MOCK_PERSONAS: Persona[] = [
   },
   {
     id: "p05",
-    name: "Suresh - Shopkeeper",
-    domain_id: "d1",
+    name: "Suresh",
+    domain_id: "d3",
     color_code: "#319F69",
     asset_path: "/assets/avatars/Suresh.svg",
     status: "AVAILABLE",
@@ -12656,7 +17189,30 @@ export const MOCK_PERSONAS: Persona[] = [
     ui_problems: "Cluttered data tables, Small fonts, Lack of visual hierarchy, Inconsistent button styles",
     cx_problems: "Anxiety over tax compliance, Frustration with slow support, Lack of trust in data security, Feeling overwhelmed by complex features",
     ai_problems: "Inaccurate sales forecasting, Weak inventory alerts, Generic business advice, Poor tax calculation accuracy"
-  }
+  },
+
+  {
+    id: "p06",
+    name: "Aditi",
+    domain_id: "d3",
+    color_code: "#29BA8F",
+    asset_path: "/assets/avatars/Aditi.svg",
+    status: "AVAILABLE",
+    claimed_by_user_id: null,
+    claimed_at: null,
+    persona_details: "27, male | Goals: Invest in mutual funds Track portfolio growth Receive smart financial insights | Pain Points: Complex investment analysis Irrelevant financial suggestions",
+    scenario: "Aditi uses an investment app but receives confusing risk analysis and irrelevant investment suggestions.",
+    ux_problems: "Difficult onboarding for investors Complex portfolio comparison flows Poor transaction transparency Overwhelming financial information",
+    ui_problems: "Cluttered data tables, Small fonts, Lack of visual hierarchy, Inconsistent button styles",
+    cx_problems: "Anxiety over tax compliance, Frustration with slow support, Lack of trust in data security, Feeling overwhelmed by complex features",
+    ai_problems: "Inaccurate sales forecasting, Weak inventory alerts, Generic business advice, Poor tax calculation accuracy"
+  },
+
+
+
+
+
+
 ];
 
 // ─────────────────────────────────────────────────────────────
@@ -12664,12 +17220,12 @@ export const MOCK_PERSONAS: Persona[] = [
 // ─────────────────────────────────────────────────────────────
 export const HARDCODED_CARDS: Card[] = [
   // p01 — Shanti Devi (Mapped to d1)
-  { 
-    id: 'c01-avatar', persona_id: 'p01', domain_id: 'd1', card_type: 'AVATAR', 
-    heading: 'Shanti Devi', content: 'Elderly Rural Patient' 
+  {
+    id: 'c01-avatar', persona_id: 'p01', domain_id: 'd1', card_type: 'AVATAR',
+    heading: 'Shanti Devi', content: 'Elderly Rural Patient'
   },
-  { 
-    id: 'c01-persona', persona_id: 'p01', domain_id: 'd1', card_type: 'PERSONA', 
+  {
+    id: 'c01-persona', persona_id: 'p01', domain_id: 'd1', card_type: 'PERSONA',
     heading: 'Elderly Rural Patient', subHeading: 'Shanti Devi', content: 'Profile Details',
     sections: [
       { label: 'Demographics', value: '63, female' },
@@ -12677,18 +17233,18 @@ export const HARDCODED_CARDS: Card[] = [
       { label: 'Pain Points', value: 'Difficulty reading English, Confused by medical terminology' },
     ]
   },
-  { 
-    id: 'c01-scenario', persona_id: 'p01', domain_id: 'd1', card_type: 'SCENARIO', 
+  {
+    id: 'c01-scenario', persona_id: 'p01', domain_id: 'd1', card_type: 'SCENARIO',
     heading: 'The Scenario', content: 'Scenario Context',
-    bodyText: 'Shanti Devi needs to consult a doctor for diabetes follow-up. She attempts to use a telemedicine app but struggles to upload reports and locate the consultation button.' 
+    bodyText: 'Shanti Devi needs to consult a doctor for diabetes follow-up. She attempts to use a telemedicine app but struggles to upload reports and locate the consultation button.'
   },
-  { 
-    id: 'c01-ux', persona_id: 'p01', domain_id: 'd1', card_type: 'UX_PROBLEM', 
+  {
+    id: 'c01-ux', persona_id: 'p01', domain_id: 'd1', card_type: 'UX_PROBLEM',
     heading: 'UX Challenges', content: 'UX Problem',
-    bodyText: 'Complex appointment booking flows, Too many steps for report uploads, Poor onboarding for elderly users.' 
+    bodyText: 'Complex appointment booking flows, Too many steps for report uploads, Poor onboarding for elderly users.'
   },
-  { 
-    id: 'c01-ui', persona_id: 'p01', domain_id: 'd1', card_type: 'UI_PROBLEM', 
+  {
+    id: 'c01-ui', persona_id: 'p01', domain_id: 'd1', card_type: 'UI_PROBLEM',
     heading: 'UI & Interaction', content: 'UI Problem',
     listItems: [
       'Visual Clutter',
@@ -12698,15 +17254,15 @@ export const HARDCODED_CARDS: Card[] = [
       'Lack of visual cues'
     ]
   },
-  { 
-    id: 'c01-cx', persona_id: 'p01', domain_id: 'd1', card_type: 'CX_PROBLEM', 
+  {
+    id: 'c01-cx', persona_id: 'p01', domain_id: 'd1', card_type: 'CX_PROBLEM',
     heading: 'CX & Trust', subHeading: 'Emotional Nudge', content: 'CX Problem',
-    bodyText: 'Fear of wrong diagnosis, Anxiety during online consultations, Lack of human reassurance.' 
+    bodyText: 'Fear of wrong diagnosis, Anxiety during online consultations, Lack of human reassurance.'
   },
-  { 
-    id: 'c01-ai', persona_id: 'p01', domain_id: 'd1', card_type: 'AI_PROBLEM', 
+  {
+    id: 'c01-ai', persona_id: 'p01', domain_id: 'd1', card_type: 'AI_PROBLEM',
     heading: 'AI Intelligence', content: 'AI Problem',
-    bodyText: 'Poor regional language understanding, Inaccurate symptom prediction, Biased health recommendations.' 
+    bodyText: 'Poor regional language understanding, Inaccurate symptom prediction, Biased health recommendations.'
   },
 ];
 
@@ -12714,7 +17270,7 @@ const generatedCards: Card[] = [];
 MOCK_PERSONAS.forEach(p => {
   const dId = p.domain_id;
   const hasHardcoded = HARDCODED_CARDS.some(c => c.persona_id === p.id && c.domain_id === dId);
-  
+
   if (!hasHardcoded) {
     // 1. AVATAR
     generatedCards.push({
@@ -12801,6 +17357,7 @@ export function isFlowComplete(slots: SlotState, correctCards: Card[]): boolean 
 export function getCorrectCards(personaId: string, domainId: string): Card[] {
   return MOCK_CARDS.filter(c => c.persona_id === personaId && c.domain_id === domainId);
 }
+
 ```
 
 ---
@@ -13630,7 +18187,7 @@ async function upsertUser(email: string, name?: string | null, avatarUrl?: strin
           id: $id, 
           email: $email, 
           name: $name, 
-          profile_picture: $profile_picture, 
+          profile_picture: $avatarUrl, 
           created_at: $createdAt, 
           updated_at: $updatedAt 
         }
@@ -13737,7 +18294,10 @@ export const authOptions: NextAuthOptions = {
 ### File: `lib/graphql/mutations.ts`
 
 ```typescript
-# Host: create initialize the card game session for a room
+// Host: create initialize the card game session for a room
+
+import { gql } from '@apollo/client'
+
 export const CREATE_CARD_GAME_SESSION = gql`
 mutation CreateCardGameSession($roomId: uuid!, $domainId: uuid!, $startedBy: uuid!, $personaIds: [room_card_game_personas_insert_input!]!) {
   insert_room_card_game_sessions_one(
@@ -13756,7 +18316,7 @@ mutation CreateCardGameSession($roomId: uuid!, $domainId: uuid!, $startedBy: uui
   }
 }
 `
-# Player: place a card into a slot
+// Player: place a card into a slot
 export const UPSERT_PLAYER_SLOT = gql`mutation UpsertPlayerSlot($sessionId: uuid!, $userId: uuid!, $personaId: uuid!, $slotType: card_flow_type!, $flowCardId: uuid!) {
   insert_room_card_game_player_slots_one(
     object: {
@@ -13774,7 +18334,7 @@ export const UPSERT_PLAYER_SLOT = gql`mutation UpsertPlayerSlot($sessionId: uuid
   ) { id }
 }
 `
-# Player: claim a persona (atomic — only succeeds if not already claimed)
+// Player: claim a persona (atomic — only succeeds if not already claimed)
 export const CLAIM_PERSONA = gql`mutation ClaimPersona($sessionPersonaId: uuid!, $userId: uuid!) {
   update_room_card_game_personas(
     where: {
@@ -13994,28 +18554,98 @@ export function generateHasuraToken(userId: string): string {
 ### File: `lib/hasura.ts`
 
 ```typescript
-const ENDPOINT = process.env.HASURA_GRAPHQL_ENDPOINT || 'http://localhost:8100/v1/graphql'
-const ADMIN_SECRET = process.env.HASURA_ADMIN_SECRET || 'secret'
+// const ENDPOINT = 'https://hasura.ubuntudevt65535.dpdns.org/v1/graphql'
+// // process.env.HASURA_GRAPHQL_ENDPOINT 
+// // || 'http://localhost:8100/v1/graphql'
+// const ADMIN_SECRET = process.env.HASURA_ADMIN_SECRET || 'secret'
 
-export async function hasuraAdminRequest<T>(
+// export async function hasuraAdminRequest<T>(
+//   query: string,
+//   variables?: Record<string, unknown>
+// ): Promise<T> {
+//   if (!ENDPOINT) {
+//     throw new Error('HASURA_GRAPHQL_ENDPOINT is not configured.')
+//   }
+
+//   // Normal database operation
+//   const res = await fetch(ENDPOINT, {
+//     method: 'POST',
+//     headers: {
+//       'Content-Type': 'application/json',
+//       'x-hasura-admin-secret': ADMIN_SECRET,
+//     },
+//     body: JSON.stringify({ query, variables }),
+//   })
+
+//   const json = await res.json()
+
+//   if (json.errors) {
+//     console.error('Hasura error:', json.errors)
+//     throw new Error(json.errors[0].message)
+//   }
+
+//   return json.data
+// }
+
+
+const HASURA_ENDPOINT = 'https://hasura.ubuntudevt65535.dpdns.org/v1/graphql'
+const HASURA_ADMIN_SECRET = 'secret'
+
+export async function hasuraAdminRequest<T = any>(
   query: string,
-  variables?: Record<string, unknown>
+  variables?: Record<string, any>
 ): Promise<T> {
-  if (!ENDPOINT) {
-    throw new Error('HASURA_GRAPHQL_ENDPOINT is not configured.')
+  if (!HASURA_ENDPOINT) {
+    throw new Error('Missing HASURA_GRAPHQL_ENDPOINT environment variable')
   }
 
-  // Normal database operation
-  const res = await fetch(ENDPOINT, {
+  if (!HASURA_ADMIN_SECRET) {
+    throw new Error('Missing HASURA_ADMIN_SECRET environment variable')
+  }
+
+  const res = await fetch(HASURA_ENDPOINT, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-hasura-admin-secret': ADMIN_SECRET,
+      'x-hasura-admin-secret': HASURA_ADMIN_SECRET,
     },
     body: JSON.stringify({ query, variables }),
   })
 
-  const json = await res.json()
+  const contentType = res.headers.get('content-type') || ''
+  const rawText = await res.text()
+
+  let json: any = null
+
+  if (contentType.includes('application/json')) {
+    try {
+      json = JSON.parse(rawText)
+    } catch (err) {
+      console.error('[Hasura JSON parse failed]', {
+        status: res.status,
+        contentType,
+        body: rawText.slice(0, 500),
+      })
+      throw new Error('Hasura returned invalid JSON')
+    }
+  } else {
+    console.error('[Hasura returned non-JSON response]', {
+      status: res.status,
+      statusText: res.statusText,
+      contentType,
+      endpoint: HASURA_ENDPOINT,
+      body: rawText.slice(0, 500),
+    })
+
+    throw new Error(
+      `Hasura returned non-JSON response. Status: ${res.status}. Check HASURA_GRAPHQL_ENDPOINT.`
+    )
+  }
+
+  if (!res.ok) {
+    console.error('[Hasura HTTP error]', json)
+    throw new Error(json?.error || json?.message || `Hasura HTTP ${res.status}`)
+  }
 
   if (json.errors) {
     console.error('Hasura error:', json.errors)
@@ -14054,6 +18684,33 @@ export const MULTIPLAYER_LOBBY_SUBSCRIPTION = gql`
   }
 `
 
+// export const MULTIPLAYER_GAME_STATE_SUBSCRIPTION = gql`
+//   subscription GameStateSubscription($code: String!) {
+//     rooms(where: { code: { _eq: $code } }) {
+//       id
+//       code
+//       status
+//       game_id
+//       host_user_id
+//       max_players
+//       room_players(order_by: { joined_at: asc }) {
+//         joined_at
+//         user {
+//           id
+//           name
+//           profile_picture
+//         }
+//       }
+//       game_state {
+//         room_id
+//         state
+//         updated_at
+//       }
+//     }
+//   }
+// `
+
+
 export const MULTIPLAYER_GAME_STATE_SUBSCRIPTION = gql`
   subscription GameStateSubscription($code: String!) {
     rooms(where: { code: { _eq: $code } }) {
@@ -14063,6 +18720,7 @@ export const MULTIPLAYER_GAME_STATE_SUBSCRIPTION = gql`
       game_id
       host_user_id
       max_players
+
       room_players(order_by: { joined_at: asc }) {
         joined_at
         user {
@@ -14071,6 +18729,26 @@ export const MULTIPLAYER_GAME_STATE_SUBSCRIPTION = gql`
           profile_picture
         }
       }
+
+      room_persona_claims(order_by: { claimed_at: asc }) {
+        id
+        user_id
+        domain_id
+        domain_name
+        domain_description
+        domain_icon
+        persona_id
+        persona_name
+        persona_hex
+        persona_asset_path
+        claimed_at
+        user {
+          id
+          name
+          profile_picture
+        }
+      }
+
       game_state {
         room_id
         state
@@ -14079,6 +18757,8 @@ export const MULTIPLAYER_GAME_STATE_SUBSCRIPTION = gql`
     }
   }
 `
+
+
 
 export const GET_ROOM_BY_CODE = gql`
   query GetRoomByCode($code: String!) {
@@ -14139,12 +18819,34 @@ export interface MultiplayerRoom {
   host_user_id: string;
   status: 'waiting' | 'in_game' | 'finished';
   game_id: string;
-  max_players: number;
+  max_players: number | null;
   room_players: MultiplayerPlayer[];
+  room_persona_claims?: RoomPersonaClaim[];
   game_state?: {
     state: any;
   };
 }
+
+
+export interface RoomPersonaClaim {
+  id: string;
+  user_id: string;
+  domain_id: string;
+  domain_name: string;
+  domain_description?: string | null;
+  domain_icon?: string | null;
+  persona_id: string;
+  persona_name: string;
+  persona_hex: string;
+  persona_asset_path?: string | null;
+  claimed_at: string;
+  user?: {
+    id: string;
+    name: string | null;
+    profile_picture: string | null;
+  };
+}
+
 
 ```
 
@@ -14524,7 +19226,7 @@ export default function NextAuthProvider({
 ```typescript
 /// <reference types="next" />
 /// <reference types="next/image-types/global" />
-import "./.next/types/routes.d.ts";
+import "./.next/dev/types/routes.d.ts";
 
 // NOTE: This file should not be edited
 // see https://nextjs.org/docs/app/api-reference/config/typescript for more information.
@@ -14539,9 +19241,10 @@ import "./.next/types/routes.d.ts";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-    allowedDevOrigins:['192.168.200.108']
+    // allowedDevOrigins:['192.168.200.108']
     // ["http://localhost:3000", "http://192.168.1.14:3000"],
     /* config options here */
+    allowedDevOrigins: ['uxathon.singh.dpdns.org', '192.168.1.31', '192.168.1.32'],
 };
 
 export default nextConfig;
@@ -14580,6 +19283,7 @@ export default nextConfig;
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/canvas-confetti": "^1.9.0",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -15163,6 +19867,17 @@ function reducer(state: GameState, action: Action): GameState {
     case 'TOGGLE_DECK_VISIBILITY':
       return { ...safeState, showDeck: !state.showDeck };
 
+    case 'PICK_ANOTHER_PERSONA':
+      return {
+        ...state,
+        gamePhase: 'DOMAIN_SELECT',
+        selectedDomain: null,
+        selectedPersona: null,
+        personaClaimed: false,
+        takenBy: null,
+        outpacedBy: null,
+      };
+
     default:
       return state;
   }
@@ -15188,6 +19903,7 @@ export function useGame() {
   if (!ctx) throw new Error('useGame must be used within GameProvider');
   return ctx;
 }
+
 ```
 
 ---
@@ -15237,125 +19953,6 @@ export function useGame() {
 ### File: `types/index.ts`
 
 ```typescript
-// 
-// lib/types.ts — Shared game types
-
-// export type CardType = 'IDENTITY' | 'DESCRIPTION' | 'SCENARIO' | 'TASK' | 'TASK_FLOW' | 'PERSUASION';
-// export type PersonaStatus = 'AVAILABLE' | 'CLAIMED';
-// export type GameMode = 'LOCK_ON_FILL' | 'REPLACE_ALLOWED' | 'SOFT_LOCK';
-
-// export interface User {
-//   id: string;
-//   username: string;
-//   teamName?: string;
-//   teamMembers?: string[];
-// }
-
-// export interface Domain {
-//   id: string;
-//   name: string;
-//   description: string;
-//   icon: string;
-// }
-
-// // export interface Persona {
-//   // id: string;
-//   // name: string;
-//   // color_code: string;
-//   // asset_path: string;
-//   // status: PersonaStatus;
-//   // claimed_by_user_id: string | null;
-//   // claimed_at: string | null;
-// // }
-
-// export interface Persona {
-//   id: string;
-//   name: string;
-//   domain_id: string; 
-//   color_code: string;
-//   asset_path: string;
-//   status: PersonaStatus;
-//   claimed_by_user_id: string | null;
-//   claimed_at?: string | null; // <--- Add this line back
-//   description?: string;
-//   scenario?: string;
-//   ux_problems?: string;
-//   ui_problems?: string;
-//   cx_problems?: string;
-//   ai_problems?: string;
-//   persona_details?: string; 
-// }
-
-
-
-// export interface Card {
-//   id: string;
-//   persona_id: string;
-//   domain_id: string;
-//   card_type: CardType;
-//   content: string;
-//   isUpgraded?: boolean;
-//   // New fields to support the rich card design
-//   heading?: string;
-//   subHeading?: string;
-//   listItems?: string[];
-//   sections?: { label: string; value: string }[];
-// }
-
-// export interface GameSession {
-//   id: string;
-//   user_id: string;
-//   persona_id: string;
-//   domain_id: string;
-//   slot_identity_id: string | null;
-//   slot_description_id: string | null;
-//   slot_scenario_id: string | null;
-//   slot_task_id: string | null;
-//   slot_task_flow_id: string | null;
-//   slot_persuasion_id: string | null;
-//   is_complete: boolean;
-// }
-
-// export type SlotKey = 'IDENTITY' | 'DESCRIPTION' | 'SCENARIO' | 'TASK' | 'TASK_FLOW' | 'PERSUASION';
-
-// export interface SlotState {
-//   IDENTITY:    Card | null;
-//   DESCRIPTION: Card | null;
-//   SCENARIO:    Card | null;
-//   TASK:        Card | null;
-//   TASK_FLOW:   Card | null;
-//   PERSUASION:  Card | null;
-// }
-
-// export const SLOT_ORDER: SlotKey[] = [
-//   'IDENTITY', 
-//   'DESCRIPTION', 
-//   'SCENARIO', 
-//   'TASK', 
-//   'TASK_FLOW', 
-//   'PERSUASION'
-// ];
-
-// export const SLOT_LABELS: Record<SlotKey, string> = {
-//   IDENTITY:    'Identity',
-//   DESCRIPTION: 'Persona',
-//   SCENARIO:    'Scenario',
-//   TASK:        'Task',
-//   TASK_FLOW:   'Flow',
-//   PERSUASION:  'Tool',
-// };
-
-// export const CARD_TYPE_SLOT_MAP: Record<CardType, SlotKey> = {
-//   IDENTITY:    'IDENTITY',
-//   DESCRIPTION: 'DESCRIPTION',
-//   SCENARIO:    'SCENARIO',
-//   TASK:        'TASK',
-//   TASK_FLOW:   'TASK_FLOW',
-//   PERSUASION:  'PERSUASION',
-// };
-
-
-
 // lib/types.ts — Shared game types
 
 export type CardType = 'AVATAR' | 'PERSONA' | 'SCENARIO' | 'UX_PROBLEM' | 'UI_PROBLEM' | 'CX_PROBLEM' | 'AI_PROBLEM';
@@ -15464,6 +20061,7 @@ export const CARD_TYPE_SLOT_MAP: Record<CardType, SlotKey> = {
   CX_PROBLEM: 'CX_PROBLEM',
   AI_PROBLEM: 'AI_PROBLEM',
 };
+
 ```
 
 ---

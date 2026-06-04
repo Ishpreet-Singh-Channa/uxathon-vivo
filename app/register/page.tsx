@@ -198,10 +198,73 @@ import {
     Mail, Lock, Phone, Cpu, Camera
 } from "lucide-react";
 
+
+type RegisterField =
+    | "name"
+    | "email"
+    | "password"
+    | "phone"
+    | "company"
+    | "skills"
+    | "avatar"
+    | "general";
+
+type RegisterErrors = Partial<Record<RegisterField, string>>;
+
+function validateEmail(email: string) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+    if (error instanceof Error && error.message) return error.message;
+    if (typeof error === "string") return error;
+    return fallback;
+}
+
+function validateRegisterForm(values: {
+    name: string;
+    email: string;
+    password: string;
+    phone: string;
+    company: string;
+    skillsRaw: string;
+}) {
+    const errors: RegisterErrors = {};
+
+    if (!values.name.trim()) errors.name = "Full name is required.";
+    else if (values.name.trim().length < 2) errors.name = "Name must be at least 2 characters.";
+
+    if (!values.email.trim()) errors.email = "Email is required.";
+    else if (!validateEmail(values.email.trim())) errors.email = "Enter a valid email address.";
+
+    if (!values.password) errors.password = "Password is required.";
+    else if (values.password.length < 8) errors.password = "Password must be at least 8 characters.";
+
+    if (!values.phone.trim()) errors.phone = "Phone number is required.";
+    else if (!/^[0-9+\-\s()]{7,15}$/.test(values.phone.trim())) errors.phone = "Enter a valid phone number.";
+
+    if (!values.company.trim()) errors.company = "Affiliation is required.";
+
+    if (!values.skillsRaw.trim()) errors.skills = "Add at least one skill.";
+    else if (
+        values.skillsRaw
+            .split(",")
+            .map((skill) => skill.trim())
+            .filter(Boolean).length === 0
+    ) {
+        errors.skills = "Add at least one valid skill.";
+    }
+
+    return errors;
+}
+
+
+
+
 export default function RegisterPage() {
     const { register } = useAuth();
     const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const [errors, setErrors] = useState<RegisterErrors>({});// const [error, setError] = useState<string | null>(null);
 
     // New state for media upload
     const [avatarBase64, setAvatarBase64] = useState<string>("");
@@ -211,8 +274,9 @@ export default function RegisterPage() {
     // Initialize random default avatar on mount
     useEffect(() => {
         const loadRandomAvatar = async () => {
-            const randomNum = Math.floor(Math.random() * 20) + 1;
+            const randomNum = Math.floor(Math.random() * 19) + 1;
             const imagePath = `/profile_pic/profile_pic${randomNum}.png`;
+            console.log("profile_pic",imagePath)
 
             // Set preview immediately for UX
             setAvatarPreview(imagePath);
@@ -226,8 +290,11 @@ export default function RegisterPage() {
                     setAvatarBase64(reader.result as string);
                 };
                 reader.readAsDataURL(blob);
-            } catch (err) {
-                console.error("Failed to load default avatar sequence:", err);
+            } catch {
+                setErrors((prev) => ({
+                    ...prev,
+                    avatar: "Default avatar could not be loaded. You can still upload one manually.",
+                }));
             }
         };
 
@@ -237,29 +304,92 @@ export default function RegisterPage() {
     // Handle user uploading their own image
     const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                const base64String = reader.result as string;
-                setAvatarBase64(base64String);
-                setAvatarPreview(base64String); // Update preview to uploaded image
-            };
-            reader.readAsDataURL(file);
+        if (!file) return;
+        setErrors((prev) => ({ ...prev, avatar: undefined, general: undefined }));
+
+        if (!file.type.startsWith("image/")) {
+            // setError("Please upload a valid image file.");
+            setErrors((prev) => ({
+                ...prev,
+                avatar: "Please upload a valid image file.",
+            }));
+            return;
         }
+
+        const maxSizeInMb = 2;
+        if (file.size > maxSizeInMb * 1024 * 1024) {
+            setErrors((prev) => ({
+                ...prev,
+                avatar: `Profile image must be smaller than ${maxSizeInMb}MB.`,
+            }));
+            return;
+        }
+
+        const reader = new FileReader();
+
+        reader.onloadend = () => {
+            const base64String = reader.result as string;
+            setAvatarBase64(base64String);
+            setAvatarPreview(base64String);
+        };
+
+        reader.onerror = () => {
+            // setError("Failed to read selected image.");
+            setErrors((prev) => ({
+                ...prev,
+                avatar: "Failed to read selected image.",
+            }));
+        };
+
+        reader.readAsDataURL(file);
+        // if (file) {
+        //     const reader = new FileReader();
+        //     reader.onloadend = () => {
+        //         const base64String = reader.result as string;
+        //         setAvatarBase64(base64String);
+        //         setAvatarPreview(base64String); // Update preview to uploaded image
+        //     };
+        //     reader.readAsDataURL(file);
+        // }
     };
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
-        setIsLoading(true);
-        setError(null);
+        // setIsLoading(true);
+        // setError(null);
+
+
+        if (!register) {
+            setErrors({
+                general: "Registration service is not ready. Please refresh and try again.",
+            });
+            return;
+        }
 
         const formData = new FormData(e.currentTarget);
-        const name = formData.get("name") as string;
-        const email = formData.get("email") as string;
-        const password = formData.get("password") as string;
-        const phone = formData.get("phone") as string;
-        const company = formData.get("company") as string;
-        const skillsRaw = formData.get("skills") as string;
+        const name = formData.get("name") as "";
+        const email = formData.get("email") as "";
+        const password = formData.get("password") as "";
+        const phone = formData.get("phone") as "";
+        const company = formData.get("company") as "";
+        const skillsRaw = formData.get("skills") as "";
+
+        const nextErrors = validateRegisterForm({
+            name,
+            email,
+            password,
+            phone,
+            company,
+            skillsRaw,
+        });
+
+        if (Object.keys(nextErrors).length > 0) {
+            setErrors(nextErrors);
+            return;
+        }
+
+        setIsLoading(true);
+        setErrors({});
 
         try {
             await register({
@@ -281,11 +411,11 @@ export default function RegisterPage() {
                 const existingProfile = localStorage.getItem(PROFILE_STORAGE_KEY);
                 if (!existingProfile) {
                     const dummyProfile = {
-                        name: name || "",
-                        email: email || "",
-                        phone: phone || "",
-                        company: company || "",
-                        skills: skillsRaw || "",
+                        name: name.trim(),
+                        email: email.trim(),
+                        phone: phone.trim(),
+                        company: company.trim(),
+                        skills: skillsRaw,
                         // Use the base64 avatar for local storage as well
                         avatarUrl: avatarBase64 || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(name || "UX")}`,
                     };
@@ -295,7 +425,9 @@ export default function RegisterPage() {
 
             window.location.href = "/dashboard";
         } catch (err: Error | unknown) {
-            setError((err as Error).message || "Registration protocol failed.");
+            setErrors({
+                general: getErrorMessage(err, "Registration failed. Please check your details and try again."),
+            });        
         } finally {
             setIsLoading(false);
         }
@@ -336,10 +468,10 @@ export default function RegisterPage() {
                         <h1 className="font-sans text-4xl uppercase tracking-tight text-white mb-3">
                             Join <span className="text-[#ff6a6a]">UXISM</span>
                         </h1>
-                        <p className="font-mono text-[12px] uppercase tracking-[0.2em] text-[#5b5b5b]">Establish your identity in the network.</p>
+                        <p className="font-mono text-[12px] uppercase tracking-[0.2em] text-[#5b5b5b]">Register on to the Uxathon Platform.</p>
                     </div>
 
-                    <form onSubmit={handleSubmit} className="group relative" suppressHydrationWarning>
+                    <form onSubmit={handleSubmit} className="group relative">
                         {/* Unified Slab Construction */}
                         <div className="border border-[#2e2e2e] bg-[#171717] divide-y divide-[#2e2e2e]">
 
@@ -380,23 +512,95 @@ export default function RegisterPage() {
                                 </div>
 
                                 <p className="mt-4 font-mono text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b] group-hover/avatar:text-[#DEF767] transition-colors">
-                                    [ Override Visual Identity ]
+                                    [ Click to Upload your Profile Pic ]
                                 </p>
+
+                                {errors.avatar && (
+                                    <p className="mt-3 font-mono text-[10px] uppercase tracking-[0.12em] text-[#ff6a6a]">
+                                        {errors.avatar}
+                                    </p>
+                                )}
                             </div>
 
-                            <RegisterInput label="Full Name" name="name" type="text" placeholder="J. DOE" icon={<UserPlus size={16} />} required />
-                            <RegisterInput label="Email Address" name="email" type="email" placeholder="YOU@DOMAIN.EXT" icon={<Mail size={16} />} required />
-                            <RegisterInput label="Password" name="password" type="password" placeholder="••••••••" icon={<Lock size={16} />} required />
+                            
+                            <RegisterInput
+                                label="Full Name"
+                                name="name"
+                                type="text"
+                                placeholder="J. DOE"
+                                icon={<UserPlus size={16} />}
+                                required
+                                error={errors.name}
+                                onChange={() => setErrors((prev) => ({ ...prev, name: undefined, general: undefined }))}
+                            />
+
+                            <RegisterInput
+                                label="Email"
+                                name="email"
+                                type="email"
+                                placeholder="abc@gmail.com"
+                                icon={<Mail size={16} />}
+                                required
+                                error={errors.email}
+                                onChange={() => setErrors((prev) => ({ ...prev, email: undefined, general: undefined }))}
+                            />
+
+                            <RegisterInput
+                                label="Password"
+                                name="password"
+                                type="password"
+                                placeholder="••••••••"
+                                icon={<Lock size={16} />}
+                                required
+                                error={errors.password}
+                                onChange={() => setErrors((prev) => ({ ...prev, password: undefined, general: undefined }))}
+                            />
+
                             <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-[#2e2e2e]">
-                                <RegisterInput label="Phone Number" name="phone" type="tel" placeholder="987********" icon={<Phone size={16} />} required />
-                                <RegisterInput label="Affiliation" name="company" type="text" placeholder="CORPORATION / ORG" icon={<Briefcase size={16} />} required />
+                                <RegisterInput
+                                    label="Phone Number"
+                                    name="phone"
+                                    type="tel"
+                                    placeholder="987********"
+                                    icon={<Phone size={16} />}
+                                    required
+                                    error={errors.phone}
+                                    onChange={() => setErrors((prev) => ({ ...prev, phone: undefined, general: undefined }))}
+                                />
+
+                                <RegisterInput
+                                    label="Affiliation"
+                                    name="company"
+                                    type="text"
+                                    placeholder="CORPORATION / ORG"
+                                    icon={<Briefcase size={16} />}
+                                    required
+                                    error={errors.company}
+                                    onChange={() => setErrors((prev) => ({ ...prev, company: undefined, general: undefined }))}
+                                />
                             </div>
-                            <RegisterInput label="Skills" name="skills" type="text" placeholder="UI, UX...(COMMA SEPARATED)" icon={<Cpu size={16} />} required />
+
+                            <RegisterInput
+                                label="Skills"
+                                name="skills"
+                                type="text"
+                                placeholder="UI, UX...(COMMA SEPARATED)"
+                                icon={<Cpu size={16} />}
+                                required
+                                error={errors.skills}
+                                onChange={() => setErrors((prev) => ({ ...prev, skills: undefined, general: undefined }))}
+                            />
                         </div>
 
-                        {error && (
-                            <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="mt-6 border border-[#ff6a6a]/30 bg-[#ff6a6a]/5 px-4 py-3 font-mono text-[11px] uppercase tracking-[0.1em] text-[#ff6a6a]">
-                                <span className="mr-2 opacity-50">ERROR:</span> {error}
+                        {errors.general && (
+                            <motion.div
+                                role="alert"
+                                initial={{ opacity: 0, x: -10 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                className="mt-6 border border-[#ff6a6a]/30 bg-[#ff6a6a]/5 px-4 py-3 font-mono text-[11px] uppercase tracking-[0.1em] text-[#ff6a6a]"
+                            >
+                                <span className="mr-2 opacity-50">REGISTRATION ERROR:</span>
+                                {errors.general}
                             </motion.div>
                         )}
 
@@ -407,7 +611,7 @@ export default function RegisterPage() {
                                         <div className="h-4 w-4 animate-spin border-2 border-[#171717] border-t-transparent rounded-full" />
                                     ) : (
                                         <>
-                                            Initialize Protocol
+                                            Register
                                             <ShieldCheck size={18} />
                                         </>
                                     )}
@@ -445,16 +649,64 @@ export default function RegisterPage() {
     );
 }
 
-function RegisterInput({ label, name, type, placeholder, icon, required }: { label: string; name: string; type: string; placeholder: string; icon: React.ReactNode; required?: boolean }) {
+function RegisterInput({
+    label,
+    name,
+    type,
+    placeholder,
+    icon,
+    required,
+    error,
+    onChange,
+}: {
+    label: string;
+    name: string;
+    type: string;
+    placeholder: string;
+    icon: React.ReactNode;
+    required?: boolean;
+    error?: string;
+    onChange?: () => void;
+}) {
     return (
         <div className="relative group/field px-6 py-5 hover:bg-[#1a1a1a] transition-colors">
-            <label className="block font-mono text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b] mb-3 group-focus-within/field:text-[#DEF767] transition-colors">{label}</label>
+            <label className="block font-mono text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b] mb-3 group-focus-within/field:text-[#DEF767] transition-colors">
+                {label}
+            </label>
+
             <div className="relative flex items-center gap-4">
-                <div className="text-[#5b5b5b] group-focus-within/field:text-[#DEF767] transition-colors">{icon}</div>
-                <input name={name} type={type} required={required} placeholder={placeholder} className="w-full bg-transparent font-mono text-[13px] text-white outline-none placeholder:text-[#2e2e2e]" />
+                <div className={`${error ? "text-[#ff6a6a]" : "text-[#5b5b5b] group-focus-within/field:text-[#DEF767]"} transition-colors`}>
+                    {icon}
+                </div>
+
+                <input
+                    name={name}
+                    type={type}
+                    required={required}
+                    placeholder={placeholder}
+                    onChange={onChange}
+                    aria-invalid={Boolean(error)}
+                    aria-describedby={error ? `${name}-error` : undefined}
+                    className="w-full bg-transparent font-mono text-[13px] text-white outline-none placeholder:text-[#2e2e2e]"
+                />
             </div>
-            {/* Focus Indicator Accent */}
-            <div className="absolute left-0 top-0 bottom-0 w-[2px] bg-[#DEF767] scale-y-0 group-focus-within/field:scale-y-100 transition-transform duration-300 origin-top" />
+
+            {error && (
+                <p
+                    id={`${name}-error`}
+                    className="mt-3 font-mono text-[10px] uppercase tracking-[0.12em] text-[#ff6a6a]"
+                >
+                    {error}
+                </p>
+            )}
+
+            <div
+                className={`absolute left-0 top-0 bottom-0 w-[2px] origin-top transition-transform duration-300 ${
+                    error
+                        ? "scale-y-100 bg-[#ff6a6a]"
+                        : "scale-y-0 bg-[#DEF767] group-focus-within/field:scale-y-100"
+                }`}
+            />
         </div>
     );
 }

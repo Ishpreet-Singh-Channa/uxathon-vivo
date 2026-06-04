@@ -16,9 +16,10 @@ type GameShellProps = {
   title: string;
   description: string;
   children: React.ReactNode;
+  variant?: "default" | "wide" | "stage";
 };
 
-export function GameShell({ meta, title, description, children }: GameShellProps) {
+export function GameShell({ meta, title, description, children, variant = "default", }: GameShellProps) {
   const pathname = usePathname();
 
   const [activeRoomCode, setActiveRoomCode] = useState<string | null>(null);
@@ -37,17 +38,24 @@ export function GameShell({ meta, title, description, children }: GameShellProps
     }
   }, [pathname]);
 
+  const shellWidthClass =
+  variant === "stage"
+    ? "max-w-[1800px] px-3 sm:px-6 lg:px-10 xl:px-14"
+    : variant === "wide"
+      ? "max-w-7xl px-4 sm:px-6 lg:px-8"
+      : "max-w-lg px-5";
+
   return (
     <main className="relative flex min-h-screen flex-col overflow-hidden bg-[#181818] text-white selection:bg-[#ff6a6a] selection:text-[#171717]">
       <PageDecor />
 
-      <section className="relative z-10 mx-auto flex w-full max-w-lg flex-1 flex-col px-5 pb-28 pt-6">
+      <section className="relative z-10 mx-auto flex w-full max-w-lg flex-1 flex-col px-5 pb-28 pt-6 ${shellWidthClass}">
         <Link
-          href="/games"
+          href="/dashboard"
           className="mb-6 inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292] active:text-[#DEF767]"
         >
           <ArrowLeft size={14} aria-hidden />
-          Games lounge
+          Dashboard
         </Link>
         <div className="mb-6">
           <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">{meta}</p>

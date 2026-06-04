@@ -47,8 +47,8 @@ export default function WinScreen({ userId }: WinScreenProps) {
   const { selectedPersona, currentUser } = state;
   const [claimStatus, setClaimStatus] = useState<'VERIFYING' | 'WON' | 'LOST'>('VERIFYING');
 
-  const [createTeam] = useMutation<CreateTeamData, CreateTeamVariables>(CREATE_TEAM);
-  const [addTeamMember] = useMutation<AddTeamMemberData, AddTeamMemberVariables>(ADD_TEAM_MEMBER);
+  // const [createTeam] = useMutation<CreateTeamData, CreateTeamVariables>(CREATE_TEAM);
+  // const [addTeamMember] = useMutation<AddTeamMemberData, AddTeamMemberVariables>(ADD_TEAM_MEMBER);
   // ---------------------------------------------------
 
   
@@ -57,61 +57,125 @@ export default function WinScreen({ userId }: WinScreenProps) {
   // const [claimPersona, ] = useMutation(CREATE_TEAM_ATOMIC);
   // const [createTeam] = useMutation(CREATE_TEAM_ATOMIC_V2);
   const claimAttempted = useRef(false);
+  
+//   useEffect(() => {
+//   async function verifyWin() {
+//     if (!selectedPersona || !currentUser || !userId || claimAttempted.current) return;
+//     claimAttempted.current = true;
+
+//     try {
+//       // Step 1: Create the team
+//       const { data: teamData } = await createTeam({
+//         variables: {
+//           name: `${selectedPersona.name} Squad`,
+//           color: selectedPersona.color_code,
+//           userId,
+//         },
+//       });
+
+//       const newTeamId = teamData?.insert_teams_one?.id;
+//       if (!newTeamId) throw new Error("Team creation returned no ID");
+
+//       // Step 2: Add the leader as a team_member
+//       await addTeamMember({
+//         variables: {
+//           teamId: newTeamId,
+//           userId,
+//           memberType: "LEADER",
+//         },
+//       });
+
+//       setClaimStatus("WON");
+//       fireConfetti();
+
+//     } catch (err: any) {
+//       console.error("Failed to verify claim:", err);
+
+//       const errorString = JSON.stringify(err);
+
+//       // Already created a team (duplicate request)
+//       if (errorString.includes("teams_leader_id_key") || 
+//           errorString.includes("teams_created_by_key")) {
+//         setClaimStatus("WON");
+//         fireConfetti();
+//         return;
+//       }
+
+//       // Someone took this color
+//       setClaimStatus("LOST");
+//       setTimeout(() => {
+//         dispatch({ type: "PERSONA_TAKEN_BY", payload: "Another player" });
+//       }, 1500);
+//     }
+//   }
+
+//   verifyWin();
+// }, [createTeam, addTeamMember, selectedPersona, currentUser, userId, dispatch]);
+
   useEffect(() => {
-  async function verifyWin() {
-    if (!selectedPersona || !currentUser || !userId || claimAttempted.current) return;
-    claimAttempted.current = true;
+    async function verifyWin() {
+      if (!selectedPersona || !state.selectedDomain || !currentUser || !userId || claimAttempted.current) return;
+      claimAttempted.current = true;
 
-    try {
-      // Step 1: Create the team
-      const { data: teamData } = await createTeam({
-        variables: {
-          name: `${selectedPersona.name} Squad`,
-          color: selectedPersona.color_code,
-          userId,
-        },
-      });
+      const roomCode = localStorage.getItem('active-room-code');
+      const token = localStorage.getItem('jwt-token');
 
-      const newTeamId = teamData?.insert_teams_one?.id;
-      if (!newTeamId) throw new Error("Team creation returned no ID");
-
-      // Step 2: Add the leader as a team_member
-      await addTeamMember({
-        variables: {
-          teamId: newTeamId,
-          userId,
-          memberType: "LEADER",
-        },
-      });
-
-      setClaimStatus("WON");
-      fireConfetti();
-
-    } catch (err: any) {
-      console.error("Failed to verify claim:", err);
-
-      const errorString = JSON.stringify(err);
-
-      // Already created a team (duplicate request)
-      if (errorString.includes("teams_leader_id_key") || 
-          errorString.includes("teams_created_by_key")) {
-        setClaimStatus("WON");
-        fireConfetti();
+      if (!roomCode || !token) {
+        setClaimStatus("LOST");
         return;
       }
 
-      // Someone took this color
-      setClaimStatus("LOST");
-      setTimeout(() => {
-        dispatch({ type: "PERSONA_TAKEN_BY", payload: "Another player" });
-      }, 1500);
+      try {
+        const res = await fetch('/api/persona-flow/claim', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            code: roomCode,
+            domain: {
+              id: state.selectedDomain.id,
+              name: state.selectedDomain.name,
+              description: state.selectedDomain.description,
+              icon: state.selectedDomain.icon,
+            },
+            persona: {
+              id: selectedPersona.id,
+              name: selectedPersona.name,
+              color_code: selectedPersona.color_code,
+              asset_path: selectedPersona.asset_path,
+            },
+          }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok || !data.won) {
+          setClaimStatus("LOST");
+          setTimeout(() => {
+            dispatch({
+              type: "PERSONA_TAKEN_BY",
+              payload: data.takenBy || "Another player",
+            });
+          }, 1000);
+          return;
+        }
+
+        setClaimStatus("WON");
+        fireConfetti();
+
+        if (data.gameEnded) {
+          alert("The game has ended");
+        }
+      } catch (err) {
+        console.error("Failed to verify claim:", err);
+        setClaimStatus("LOST");
+      }
     }
-  }
 
-  verifyWin();
-}, [createTeam, addTeamMember, selectedPersona, currentUser, userId, dispatch]);
-
-
+    verifyWin();
+  }, [selectedPersona, state.selectedDomain, currentUser, userId, dispatch]);
 
 
 

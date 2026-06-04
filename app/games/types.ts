@@ -9,7 +9,7 @@ export interface GameDefinition {
   id: string;
   name: string;
   description?: string;
-  category: 'cognitive' | 'reflex' | 'design' | 'accessibility';
+  category: 'strategy' | 'cognitive' | 'reflex' | 'design' | 'accessibility';
   scoring: GameScoring;
   realtime: boolean;
   leaderboard: boolean;

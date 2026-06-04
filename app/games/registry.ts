@@ -6,7 +6,7 @@ import { numberMemoryConfig } from "./number-memory/config";
 import { reactionTimeConfig } from "./reaction-time/config";
 import { sequenceMemoryConfig } from "./sequence-memory/config";
 import { personaFlowConfig } from "./persona-flow/config";
-
+import { biddingConfig } from "./bidding/config";
 
 const gameRegistry = new Map<string, GameDefinition>();
 // 2. Auto-register them into the Map immediately
@@ -15,7 +15,8 @@ const coreGames = [
   numberMemoryConfig,
   reactionTimeConfig,
   sequenceMemoryConfig,
-  personaFlowConfig
+  personaFlowConfig,
+  biddingConfig
 ];
 
 coreGames.forEach((config) => {

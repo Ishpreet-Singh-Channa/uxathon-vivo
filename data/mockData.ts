@@ -141,7 +141,18 @@
 // Fully self-contained mock dataset — no Hasura/DB required for the MVP demo.
 
 import { Domain, Persona, Card, User } from '@/app/x/types/index';
-
+import {
+  HeartPulse,
+  GraduationCap,
+  Landmark,
+  ShoppingCart,
+  TrainFront, // or Truck / Bus
+  Sprout, // or Tractor
+  Store,
+  Plane, // or MapPin
+  Scale, // or Building2
+  Clapperboard
+} from 'lucide-react';
 export const MOCK_USERS: User[] = [
   { id: 'u1', username: 'PlayerOne', teamName: 'Alpha Squad', teamMembers: ['Alice', 'Bob', 'Charlie'] },
   { id: 'u2', username: 'NeonRacer', teamName: 'Cyber Punks', teamMembers: ['Dave', 'Eve', 'Frank'] },
@@ -149,12 +160,32 @@ export const MOCK_USERS: User[] = [
   { id: 'u4', username: 'DataPilot', teamName: 'NeuroNet', teamMembers: ['Jack', 'Karl', 'Liam'] },
 ];
 
+// export const MOCK_DOMAINS: Domain[] = [
+//   { id: 'd1', name: 'Health Care Sector', icon: '◈', description: 'Delivering quality healthcare services to improve patient outcomes and wellbeing.' },
+//   { id: 'd2', name: 'Education Sector', icon: '⊕', description: 'Empowering learners through accessible, engaging, and effective educational experiences.' },
+//   { id: 'd3', name: 'Banking & Finance Sector', icon: '⊙', description: 'Managing financial transactions securely while enabling economic growth opportunities.' },
+//   { id: 'd4', name: 'E-Commerce Sector', icon: '🎮', description: 'Providing convenient online shopping experiences with seamless digital transactions.' },
+//   { id: 'd5', name: 'Transportation & Mobility Sector', icon: '🎮', description: 'Enabling efficient movement of people and goods across regions.' },
+//   { id: 'd6', name: 'Agriculture Sector', icon: '🎮', description: 'Enhancing crop production through sustainable farming practices and innovation.' },
+//   { id: 'd7', name: 'Retail Sector', icon: '🎮', description: 'Connecting customers with products through personalized shopping experiences daily.' },
+//   { id: 'd8', name: 'Travel & Hospitality Sector', icon: '🎮', description: 'Creating exceptional travel experiences and comfortable hospitality services worldwide.' },
+//   { id: 'd9', name: 'Government & Public Service Sector', icon: '🎮', description: 'Delivering public services efficiently while promoting transparency and accountability.' },
+//   { id: 'd10', name: 'Media & Entertainment Sector', icon: '🎮', description: 'Engaging audiences with creative content across diverse digital platforms.' },
+// ];
+
 export const MOCK_DOMAINS: Domain[] = [
-  { id: 'd1', name: 'FinTech', icon: '◈', description: 'Payments, trading, compliance & wealth management' },
-  { id: 'd2', name: 'HealthTech', icon: '⊕', description: 'Clinical workflows, diagnostics, & patient care' },
-  { id: 'd3', name: 'AI Tech', icon: '⊙', description: 'Model training, ethics, & intelligent agents' },
-  { id: 'd4', name: 'GameDev', icon: '🎮', description: 'Mechanics, rendering, & player experience' },
+  { id: 'd1', name: 'Health Care Sector', icon: '✚', description: 'Delivering quality healthcare services to improve patient outcomes and wellbeing.' }, // Heavy cross
+  { id: 'd2', name: 'Education Sector', icon: '✎', description: 'Empowering learners through accessible, engaging, and effective educational experiences.' }, // Pencil
+  { id: 'd3', name: 'Banking & Finance Sector', icon: '⛃', description: 'Managing financial transactions securely while enabling economic growth opportunities.' }, // Coin stack / Database
+  { id: 'd4', name: 'E-Commerce Sector', icon: '⊞', description: 'Providing convenient online shopping experiences with seamless digital transactions.' }, // Digital grid / Window
+  { id: 'd5', name: 'Transportation & Mobility Sector', icon: '⇄', description: 'Enabling efficient movement of people and goods across regions.' }, // Movement arrows
+  { id: 'd6', name: 'Agriculture Sector', icon: '⚘', description: 'Enhancing crop production through sustainable farming practices and innovation.' }, // Plant symbol
+  { id: 'd7', name: 'Retail Sector', icon: '⌂', description: 'Connecting customers with products through personalized shopping experiences daily.' }, // Storefront / Building
+  { id: 'd8', name: 'Travel & Hospitality Sector', icon: '⛯', description: 'Creating exceptional travel experiences and comfortable hospitality services worldwide.' }, // Map marker / Compass
+  { id: 'd9', name: 'Government & Public Service Sector', icon: '🏛', description: 'Delivering public services efficiently while promoting transparency and accountability.' }, // Scales
+  { id: 'd10', name: 'Media & Entertainment Sector', icon: '▷', description: 'Engaging audiences with creative content across diverse digital platforms.' }  // Play button
 ];
+
 
 export const MOCK_PERSONAS: Persona[] = [
   {
@@ -175,7 +206,7 @@ export const MOCK_PERSONAS: Persona[] = [
   },
   {
     id: "p02",
-    name: "Rohit",
+    name: "Rohit Malhotra",
     domain_id: "d1",
     color_code: "#CADB2B",
     asset_path: "/assets/avatars/Rohit.svg",
@@ -192,7 +223,7 @@ export const MOCK_PERSONAS: Persona[] = [
   {
     id: "p03",
     name: "Kavya",
-    domain_id: "d1",
+    domain_id: "d2",
     color_code: "#72AC22",
     asset_path: "/assets/avatars/Kavya.svg",
     status: "AVAILABLE",
@@ -208,7 +239,7 @@ export const MOCK_PERSONAS: Persona[] = [
   {
     id: "p04",
     name: "Dr. Meera",
-    domain_id: "d1",
+    domain_id: "d2",
     color_code: "#4BB059",
     asset_path: "/assets/avatars/DrMeera.svg",
     status: "AVAILABLE",
@@ -223,8 +254,8 @@ export const MOCK_PERSONAS: Persona[] = [
   },
   {
     id: "p05",
-    name: "Suresh - Shopkeeper",
-    domain_id: "d1",
+    name: "Suresh",
+    domain_id: "d3",
     color_code: "#319F69",
     asset_path: "/assets/avatars/Suresh.svg",
     status: "AVAILABLE",
@@ -236,7 +267,30 @@ export const MOCK_PERSONAS: Persona[] = [
     ui_problems: "Cluttered data tables, Small fonts, Lack of visual hierarchy, Inconsistent button styles",
     cx_problems: "Anxiety over tax compliance, Frustration with slow support, Lack of trust in data security, Feeling overwhelmed by complex features",
     ai_problems: "Inaccurate sales forecasting, Weak inventory alerts, Generic business advice, Poor tax calculation accuracy"
-  }
+  },
+
+  {
+    id: "p06",
+    name: "Aditi",
+    domain_id: "d3",
+    color_code: "#29BA8F",
+    asset_path: "/assets/avatars/Aditi.svg",
+    status: "AVAILABLE",
+    claimed_by_user_id: null,
+    claimed_at: null,
+    persona_details: "27, male | Goals: Invest in mutual funds Track portfolio growth Receive smart financial insights | Pain Points: Complex investment analysis Irrelevant financial suggestions",
+    scenario: "Aditi uses an investment app but receives confusing risk analysis and irrelevant investment suggestions.",
+    ux_problems: "Difficult onboarding for investors Complex portfolio comparison flows Poor transaction transparency Overwhelming financial information",
+    ui_problems: "Cluttered data tables, Small fonts, Lack of visual hierarchy, Inconsistent button styles",
+    cx_problems: "Anxiety over tax compliance, Frustration with slow support, Lack of trust in data security, Feeling overwhelmed by complex features",
+    ai_problems: "Inaccurate sales forecasting, Weak inventory alerts, Generic business advice, Poor tax calculation accuracy"
+  },
+
+
+
+
+
+
 ];
 
 // ─────────────────────────────────────────────────────────────
@@ -244,12 +298,12 @@ export const MOCK_PERSONAS: Persona[] = [
 // ─────────────────────────────────────────────────────────────
 export const HARDCODED_CARDS: Card[] = [
   // p01 — Shanti Devi (Mapped to d1)
-  { 
-    id: 'c01-avatar', persona_id: 'p01', domain_id: 'd1', card_type: 'AVATAR', 
-    heading: 'Shanti Devi', content: 'Elderly Rural Patient' 
+  {
+    id: 'c01-avatar', persona_id: 'p01', domain_id: 'd1', card_type: 'AVATAR',
+    heading: 'Shanti Devi', content: 'Elderly Rural Patient'
   },
-  { 
-    id: 'c01-persona', persona_id: 'p01', domain_id: 'd1', card_type: 'PERSONA', 
+  {
+    id: 'c01-persona', persona_id: 'p01', domain_id: 'd1', card_type: 'PERSONA',
     heading: 'Elderly Rural Patient', subHeading: 'Shanti Devi', content: 'Profile Details',
     sections: [
       { label: 'Demographics', value: '63, female' },
@@ -257,18 +311,18 @@ export const HARDCODED_CARDS: Card[] = [
       { label: 'Pain Points', value: 'Difficulty reading English, Confused by medical terminology' },
     ]
   },
-  { 
-    id: 'c01-scenario', persona_id: 'p01', domain_id: 'd1', card_type: 'SCENARIO', 
+  {
+    id: 'c01-scenario', persona_id: 'p01', domain_id: 'd1', card_type: 'SCENARIO',
     heading: 'The Scenario', content: 'Scenario Context',
-    bodyText: 'Shanti Devi needs to consult a doctor for diabetes follow-up. She attempts to use a telemedicine app but struggles to upload reports and locate the consultation button.' 
+    bodyText: 'Shanti Devi needs to consult a doctor for diabetes follow-up. She attempts to use a telemedicine app but struggles to upload reports and locate the consultation button.'
   },
-  { 
-    id: 'c01-ux', persona_id: 'p01', domain_id: 'd1', card_type: 'UX_PROBLEM', 
+  {
+    id: 'c01-ux', persona_id: 'p01', domain_id: 'd1', card_type: 'UX_PROBLEM',
     heading: 'UX Challenges', content: 'UX Problem',
-    bodyText: 'Complex appointment booking flows, Too many steps for report uploads, Poor onboarding for elderly users.' 
+    bodyText: 'Complex appointment booking flows, Too many steps for report uploads, Poor onboarding for elderly users.'
   },
-  { 
-    id: 'c01-ui', persona_id: 'p01', domain_id: 'd1', card_type: 'UI_PROBLEM', 
+  {
+    id: 'c01-ui', persona_id: 'p01', domain_id: 'd1', card_type: 'UI_PROBLEM',
     heading: 'UI & Interaction', content: 'UI Problem',
     listItems: [
       'Visual Clutter',
@@ -278,15 +332,15 @@ export const HARDCODED_CARDS: Card[] = [
       'Lack of visual cues'
     ]
   },
-  { 
-    id: 'c01-cx', persona_id: 'p01', domain_id: 'd1', card_type: 'CX_PROBLEM', 
+  {
+    id: 'c01-cx', persona_id: 'p01', domain_id: 'd1', card_type: 'CX_PROBLEM',
     heading: 'CX & Trust', subHeading: 'Emotional Nudge', content: 'CX Problem',
-    bodyText: 'Fear of wrong diagnosis, Anxiety during online consultations, Lack of human reassurance.' 
+    bodyText: 'Fear of wrong diagnosis, Anxiety during online consultations, Lack of human reassurance.'
   },
-  { 
-    id: 'c01-ai', persona_id: 'p01', domain_id: 'd1', card_type: 'AI_PROBLEM', 
+  {
+    id: 'c01-ai', persona_id: 'p01', domain_id: 'd1', card_type: 'AI_PROBLEM',
     heading: 'AI Intelligence', content: 'AI Problem',
-    bodyText: 'Poor regional language understanding, Inaccurate symptom prediction, Biased health recommendations.' 
+    bodyText: 'Poor regional language understanding, Inaccurate symptom prediction, Biased health recommendations.'
   },
 ];
 
@@ -294,7 +348,7 @@ const generatedCards: Card[] = [];
 MOCK_PERSONAS.forEach(p => {
   const dId = p.domain_id;
   const hasHardcoded = HARDCODED_CARDS.some(c => c.persona_id === p.id && c.domain_id === dId);
-  
+
   if (!hasHardcoded) {
     // 1. AVATAR
     generatedCards.push({

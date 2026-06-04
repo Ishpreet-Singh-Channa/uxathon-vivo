@@ -42,13 +42,14 @@ export default function PersonaTakenScreen() {
           </p>
         )}
 
-        <p className={styles.sub}>Choose a different persona and keep racing.</p>
+        <p className={styles.sub}>Select another domain or persona.</p>
 
         <div className={styles.actions}>
           <button
             id="taken-pick-another"
+            type="button"
             className={styles.primaryBtn}
-            onClick={() => dispatch({ type: 'GO_TO_PHASE', payload: 'PERSONA_SELECT' })}
+            onClick={() => dispatch({ type: 'PICK_ANOTHER_PERSONA' })}
           >
             Pick Another Persona
           </button>

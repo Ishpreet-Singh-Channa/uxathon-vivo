@@ -311,6 +311,8 @@ export interface GameState {
   currentUser:    User | null;
   selectedDomain: Domain | null;
   selectedPersona: Persona | null;
+  takenBy:         null,
+  outpacedBy:      null
   correctCards:   Card[];
   deck:           Card[];
   pool:           Card[];
@@ -360,6 +362,8 @@ const initialState: GameState = {
   showTryAgainPopup: false,
   showDeck:        true,
   leaderboard:     [],
+  takenBy:         null,
+  outpacedBy:      null
 };
 
 // ─── ACTIONS ──────────────────────────────────────────────────
@@ -380,7 +384,8 @@ export type Action =
   | { type: 'SHOW_TRY_AGAIN' }
   | { type: 'HIDE_TRY_AGAIN' }
   | { type: 'PLACE_CARD_FORCE';   payload: { card: Card } }
-  | { type: 'TOGGLE_DECK_VISIBILITY' };
+  | { type: 'TOGGLE_DECK_VISIBILITY' }
+  | { type: 'PICK_ANOTHER_PERSONA' };
 
 function reducer(state: GameState, action: Action): GameState {
   // Ensure leaderboard exists to prevent HMR or state initialization issues
@@ -562,6 +567,17 @@ function reducer(state: GameState, action: Action): GameState {
 
     case 'TOGGLE_DECK_VISIBILITY':
       return { ...safeState, showDeck: !state.showDeck };
+
+    case 'PICK_ANOTHER_PERSONA':
+      return {
+        ...state,
+        gamePhase: 'DOMAIN_SELECT',
+        selectedDomain: null,
+        selectedPersona: null,
+        personaClaimed: false,
+        takenBy: null,
+        outpacedBy: null,
+      };
 
     default:
       return state;

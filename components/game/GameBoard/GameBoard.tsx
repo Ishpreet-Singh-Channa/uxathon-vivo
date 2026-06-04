@@ -15,23 +15,6 @@ import styles from './GameBoard.module.css';
 
 export default function GameBoard() {
   const { state, dispatch } = useGame();
-
-  const { data } = useSubscription<{ teams: any[] }>(WATCH_TEAMS, {
-    skip: !state.selectedPersona || state.gamePhase === 'WON' || state.gamePhase === 'PERSONA_TAKEN',
-  });
-  useEffect(() => {
-    if (!data || !state.selectedPersona || !state.currentUser) return;
-    const rivalTeam = data.teams.find(
-      (team: any) => team.color === state.selectedPersona?.color_code
-    );
-    if (rivalTeam && rivalTeam.leader_id !== state.currentUser.id) {
-      dispatch({
-        type: 'PERSONA_TAKEN_BY',
-        payload: rivalTeam.user?.name || 'Another player'
-      });
-    }
-  }, [data, state.selectedPersona, state.currentUser, dispatch]);
-
   return (
     <main className={styles.board} aria-label="Game board">
       <TopBar />

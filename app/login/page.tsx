@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ArrowRight, Eye, EyeOff, Plus, Check } from "lucide-react";
 import Field from "@/components/Field";
 import { useAuth } from "@/context/token-context";
+import Link from "next/link";
 
 type LoginForm = {
     email: string;
@@ -23,8 +24,17 @@ function validateEmail(email: string) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+    function getErrorMessage(error: unknown, fallback: string) {
+        if (error instanceof Error && error.message) return error.message;
+        if (typeof error === "string") return error;
+        return fallback;
+    }  
+
+
 function validateLogin(form: LoginForm): LoginErrors {
     const errors: LoginErrors = {};
+
+      
 
     if (!form.email.trim()) errors.email = "Email is required.";
     else if (!validateEmail(form.email)) errors.email = "Enter a valid email address.";
@@ -46,31 +56,68 @@ export default function UXISMLoginPage() {
     function updateField<K extends keyof LoginForm>(key: K, value: LoginForm[K]) {
         const nextForm = { ...form, [key]: value };
         setForm(nextForm);
-        setErrors((prevErrors) => ({ ...prevErrors, [key]: undefined }));
+        setErrors((prevErrors) => ({ 
+            ...prevErrors, 
+            [key]: undefined,
+            general: undefined,
+             }));
         // setErrors(validateLogin(nextForm));
     }
 
-    function submitLogin(event: React.FormEvent<HTMLFormElement>) {
+    // function submitLogin(event: React.FormEvent<HTMLFormElement>) {
+    //     event.preventDefault();
+
+    //     const nextErrors = validateLogin(form);
+    //     setErrors(nextErrors);
+    //     if (Object.keys(nextErrors).length > 0) return;
+
+    //     const payload = {
+    //         email: form.email.trim() ? form.email : undefined,
+    //         password: form.password.trim() ? form.password : undefined,
+    //     };
+
+    //     setLoading(true);
+    //     auth?.login({ email: payload.email, password: payload.password! })
+    //         .then(() => {
+    //             window.location.href = "/dashboard";
+    //         })
+    //         .catch((error) => {
+    //             setErrors({ general: error.message || "Login failed. Please try again." });
+    //         })
+    //         .finally(() => setLoading(false));
+    // }
+
+    async function submitLogin(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault();
 
         const nextErrors = validateLogin(form);
         setErrors(nextErrors);
         if (Object.keys(nextErrors).length > 0) return;
 
-        const payload = {
-            email: form.email.trim() ? form.email : undefined,
-            password: form.password.trim() ? form.password : undefined,
-        };
+        if (!auth?.login) {
+            setErrors({
+                general: "Authentication service is not ready. Please refresh and try again.",
+            });
+            return;
+        }
 
         setLoading(true);
-        auth?.login({ email: payload.email, password: payload.password! })
-            .then(() => {
-                window.location.href = "/dashboard";
-            })
-            .catch((error) => {
-                setErrors({ general: error.message || "Login failed. Please try again." });
-            })
-            .finally(() => setLoading(false));
+        setErrors({});
+
+        try {
+            await auth.login({
+                email: form.email.trim(),
+                password: form.password,
+            });
+
+            window.location.href = "/dashboard";
+        } catch (error) {
+            setErrors({
+                general: getErrorMessage(error, "Login failed. Please check your credentials and try again."),
+            });
+        } finally {
+            setLoading(false);
+        }
     }
 
     return (
@@ -131,6 +178,23 @@ export default function UXISMLoginPage() {
                                                 </button>
                                             </div>
                                         </Field>
+
+
+
+                                        {errors.general && (
+                                            <motion.div
+                                                role="alert"
+                                                initial={{ opacity: 0, y: -6 }}
+                                                animate={{ opacity: 1, y: 0 }}
+                                                className="border border-[#ff6a6a]/30 bg-[#ff6a6a]/5 px-4 py-3 font-mono text-[11px] uppercase tracking-[0.1em] text-[#ff6a6a]"
+                                            >
+                                                <span className="mr-2 opacity-50">AUTH ERROR:</span>
+                                                {errors.general}
+                                            </motion.div>
+                                        )}
+
+
+                                        
                                     </div>
 
                                     <div className="flex items-center justify-between gap-4 border-y border-[#2e2e2e] py-4">
@@ -147,13 +211,21 @@ export default function UXISMLoginPage() {
                                     </div>
 
                                     <footer className="flex items-center justify-between gap-3 border-t border-[#2e2e2e] pt-5">
-                                        <button type="button" className="h-11 border border-[#2e2e2e] px-4 font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292] active:border-[rgba(222,247,103,0.5)] active:text-[#DEF767]">
+                                        <Link
+                                            href="/register"
+                                            className="grid h-11 place-items-center border border-[#2e2e2e] px-4 font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292] transition-colors active:border-[rgba(222,247,103,0.5)] active:text-[#DEF767]"
+                                        >
                                             Create account
-                                        </button>
-
-                                        <button type="submit" className={`flex h-11 items-center gap-2 ${loading ? "bg-[#c6bbbb]" : "bg-[#ff6a6a]"} px-5 font-mono text-[11px] uppercase tracking-[0.14em] text-[#171717]`}>
-                                            Login <ArrowRight size={15} />
-                                        </button>
+                                        </Link>
+                                        <button
+                                        type="submit"
+                                        disabled={loading}
+                                        className={`flex h-11 items-center gap-2 px-5 font-mono text-[11px] uppercase tracking-[0.14em] text-[#171717] transition-opacity disabled:cursor-not-allowed disabled:opacity-60 ${
+                                            loading ? "bg-[#c6bbbb]" : "bg-[#ff6a6a]"
+                                        }`}
+                                    >
+                                        {loading ? "Checking..." : "Login"} {!loading && <ArrowRight size={15} />}
+                                    </button>
                                     </footer>
                                 </motion.form>
                             ) : (
