@@ -123,52 +123,6 @@ export async function POST(req: Request) {
     )
   }
 
-
-
-  // replacing teamsData block with---------
-  // const teamsData = await hasuraAdminRequest<{
-  //   teams: Array<{
-  //     id: string
-  //     name: string
-  //     color: string | null
-  //     leader_id: string | null
-  //     persona_id: string | null
-  //     persona_name: string | null
-  //     persona_hex: string | null
-  //   }>
-  // }>(
-  //   `query GetBiddingRoomTeams($roomId: uuid!) {
-  //     teams(where: { room_id: { _eq: $roomId } }) {
-  //       id
-  //       name
-  //       color
-  //       leader_id
-  //       persona_id
-  //       persona_name
-  //       persona_hex
-  //     }
-  //   }`,
-  //   { roomId: room.id }
-  // )
-
-  // const teamIds = teamsData.teams.map((team) => team.id)
-
-  // if (teamIds.length === 0) {
-  //   return Response.json(
-  //     {
-  //       error: 'No teams found in this room. Run Persona Flow in this same room first.',
-  //       debug: {
-  //         roomId: room.id,
-  //         roomCode: room.code,
-  //         roomPlayerCount: room.room_players.length,
-  //       },
-  //     },
-  //     { status: 400 }
-  //   )
-  // }
-  // replacing teamsData block with---------
-  // this------------------------:
-
   async function fetchRoomTeams(roomId: string) {
     return hasuraAdminRequest<{
       teams: Array<{
@@ -258,8 +212,8 @@ export async function POST(req: Request) {
         insert_team_members(
           objects: $objects
           on_conflict: {
-            constraint: team_members_pkey
-            update_columns: []
+            constraint: team_members_team_id_user_id_key
+            update_columns: [member_type]
           }
         ) {
           affected_rows

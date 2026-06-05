@@ -92,24 +92,27 @@
   position: absolute;
   top: 16px;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 18px;
   font-weight: 600;
   letter-spacing: 0.14em;
   border: 1.5px solid rgba(0, 0, 0, 0.35);
   padding: 2px 7px;
   border-radius: 3px;
-  background: rgba(0, 0, 0, 0.12);
+  background: rgba(0, 0, 0, 0.188);
   color: rgba(0, 0, 0, 0.6);
   pointer-events: none;
-  z-index: 20;
+  z-index: 50;
 }
 
 .hintL {
-  left: 14px;
+  left: 26%;
+  top: 50%;
+
 }
 
 .hintR {
-  right: 14px;
+  right: 32%;
+  top: 50%;
 }
 
 .cue {
@@ -127,10 +130,10 @@
 .btns {
   display: flex;
   align-items: center;
-  gap: 40px;
-  margin-top: -30px;
+  gap: 55px;
+  margin-top: -55px;
   /* Move them up into the deck area */
-  z-index: 30;
+  z-index: 35;
   position: relative;
 }
 
@@ -153,25 +156,25 @@
 }
 
 .btnL {
-  background: var(--coral);
-  color: #000;
+  background: #ff6b6b;
+  color: #4a4a4a;
   border-color: rgba(0, 0, 0, 0.1);
 }
 
 .btnL:hover {
   background: #ff6b6b;
-  transform: translateY(-2px);
+  transform: translateX(-20px);
 }
 
 .btnR {
-  background: var(--lime);
-  color: #000;
+  background: #c4ff80;
+  color: #4a4a4a;
   border-color: rgba(0, 0, 0, 0.1);
 }
 
 .btnR:hover {
-  background: #e1ff80;
-  transform: translateY(-2px);
+  background: #c4ff80;
+  transform: translateX(20px);
 }
 
 .empty {
@@ -189,8 +192,8 @@
 
 .resetBtn {
   font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--secondary);
+  font-size: 14px;
+  color: var(--text-main);
   border: 1px solid var(--border);
   background: transparent;
   padding: 8px 18px;

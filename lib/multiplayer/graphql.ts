@@ -20,32 +20,6 @@ export const MULTIPLAYER_LOBBY_SUBSCRIPTION = gql`
   }
 `
 
-// export const MULTIPLAYER_GAME_STATE_SUBSCRIPTION = gql`
-//   subscription GameStateSubscription($code: String!) {
-//     rooms(where: { code: { _eq: $code } }) {
-//       id
-//       code
-//       status
-//       game_id
-//       host_user_id
-//       max_players
-//       room_players(order_by: { joined_at: asc }) {
-//         joined_at
-//         user {
-//           id
-//           name
-//           profile_picture
-//         }
-//       }
-//       game_state {
-//         room_id
-//         state
-//         updated_at
-//       }
-//     }
-//   }
-// `
-
 
 export const MULTIPLAYER_GAME_STATE_SUBSCRIPTION = gql`
   subscription GameStateSubscription($code: String!) {
@@ -68,6 +42,7 @@ export const MULTIPLAYER_GAME_STATE_SUBSCRIPTION = gql`
 
       room_persona_claims(order_by: { claimed_at: asc }) {
         id
+        room_id
         user_id
         domain_id
         domain_name

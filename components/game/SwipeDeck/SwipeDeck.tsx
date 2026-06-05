@@ -126,7 +126,6 @@ const DraggableCard = forwardRef<CardHandle, DraggableCardProps>(function Dragga
         />
       </div>
 
-      <p className={styles.cue}>← discard · select →</p>
     </motion.div>
   );
 });

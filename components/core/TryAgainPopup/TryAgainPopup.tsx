@@ -39,11 +39,11 @@ export default function TryAgainPopup() {
               </div>
 
               <h3 className="font-serif text-3xl uppercase tracking-tighter text-white mb-4">
-                Flow <span className="text-[#ff6a6a]">Dissonance</span>
+                Flow <span className="text-[#ff6a6a]">Incorrect</span>
               </h3>
               
               <p className="font-sans text-[13px] text-[#929292] leading-relaxed mb-10 max-w-[28ch]">
-                The current architectural alignment does not match the target persona. Dual-link failure detected.
+                Your current persona card alignment does not match the target persona.
               </p>
 
               <div className="flex flex-col w-full gap-3">
@@ -52,19 +52,15 @@ export default function TryAgainPopup() {
                   className="group flex items-center justify-center gap-3 w-full h-12 bg-[#ff6a6a] text-[#171717] font-mono text-[11px] uppercase tracking-widest font-bold hover:bg-white transition-all duration-300"
                 >
                   <RotateCcw size={14} className="group-hover:rotate-[-90deg] transition-transform duration-500" />
-                  Wipe Board Protocol
+                  Wipe Flow & try again
                 </button>
                 
                 <button 
                   onClick={() => dispatch({ type: 'HIDE_TRY_AGAIN' })}
                   className="w-full h-12 border border-[#2e2e2e] text-[#5b5b5b] font-mono text-[10px] uppercase tracking-widest hover:border-[#DEF767] hover:text-white transition-all"
                 >
-                  Dismiss_Warning
+                  Cancel
                 </button>
-              </div>
-
-              <div className="mt-8 pt-6 border-t border-[#2e2e2e] w-full">
-                <span className="font-mono text-[9px] uppercase tracking-[0.4em] text-[#5b5b5b]">Error_Code: SEQUENCE_MISMATCH_X04</span>
               </div>
             </div>
           </motion.div>

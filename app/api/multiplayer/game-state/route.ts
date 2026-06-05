@@ -39,6 +39,7 @@ export async function GET(req: NextRequest) {
 
           room_persona_claims(order_by: { claimed_at: asc }) {
           id
+          room_id
           user_id
           domain_id
           domain_name

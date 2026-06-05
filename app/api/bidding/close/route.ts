@@ -228,8 +228,8 @@ export async function POST(req: Request) {
             member_type: "MEMBER"
           }
           on_conflict: {
-            constraint: team_members_pkey
-            update_columns: []
+            constraint: team_members_team_id_user_id_key
+            update_columns: [member_type]
           }
         ) {
           id

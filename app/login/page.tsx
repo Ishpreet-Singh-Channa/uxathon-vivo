@@ -1,10 +1,17 @@
 "use client";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowRight, Eye, EyeOff, Plus, Check } from "lucide-react";
 import Field from "@/components/Field";
 import { useAuth } from "@/context/token-context";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+
+import {
+    autoJoinRoomFromRedirect,
+    getSafeRedirectFromUrl,
+} from "@/lib/room-invite";
+
 
 type LoginForm = {
     email: string;
@@ -53,6 +60,22 @@ export default function UXISMLoginPage() {
     const [loading, setLoading] = useState(false);
     const auth = useAuth();
 
+    const router = useRouter();
+    const [registerHref, setRegisterHref] = useState("/register");
+
+    useEffect(() => {
+        if (typeof window === "undefined") return;
+
+        const params = new URLSearchParams(window.location.search);
+        const redirect = params.get("redirect");
+
+        setRegisterHref(
+            redirect
+                ? `/register?redirect=${encodeURIComponent(redirect)}`
+                : "/register"
+        );
+    }, []);
+
     function updateField<K extends keyof LoginForm>(key: K, value: LoginForm[K]) {
         const nextForm = { ...form, [key]: value };
         setForm(nextForm);
@@ -61,31 +84,7 @@ export default function UXISMLoginPage() {
             [key]: undefined,
             general: undefined,
              }));
-        // setErrors(validateLogin(nextForm));
     }
-
-    // function submitLogin(event: React.FormEvent<HTMLFormElement>) {
-    //     event.preventDefault();
-
-    //     const nextErrors = validateLogin(form);
-    //     setErrors(nextErrors);
-    //     if (Object.keys(nextErrors).length > 0) return;
-
-    //     const payload = {
-    //         email: form.email.trim() ? form.email : undefined,
-    //         password: form.password.trim() ? form.password : undefined,
-    //     };
-
-    //     setLoading(true);
-    //     auth?.login({ email: payload.email, password: payload.password! })
-    //         .then(() => {
-    //             window.location.href = "/dashboard";
-    //         })
-    //         .catch((error) => {
-    //             setErrors({ general: error.message || "Login failed. Please try again." });
-    //         })
-    //         .finally(() => setLoading(false));
-    // }
 
     async function submitLogin(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault();
@@ -110,7 +109,22 @@ export default function UXISMLoginPage() {
                 password: form.password,
             });
 
-            window.location.href = "/dashboard";
+            // window.location.href = "/dashboard";
+            const redirectPath = getSafeRedirectFromUrl("/dashboard");
+
+            try {
+                await autoJoinRoomFromRedirect(redirectPath);
+            } catch (joinError) {
+                setErrors({
+                    general:
+                        joinError instanceof Error
+                            ? joinError.message
+                            : "Login worked, but joining the room failed.",
+                });
+                return;
+            }
+
+            router.replace(redirectPath);
         } catch (error) {
             setErrors({
                 general: getErrorMessage(error, "Login failed. Please check your credentials and try again."),
@@ -132,37 +146,30 @@ export default function UXISMLoginPage() {
             <div className="pointer-events-none fixed left-1/2 top-[-130px] h-[340px] w-[340px] -translate-x-1/2 rounded-full bg-[radial-gradient(circle_at_30%_30%,#46B1FF,transparent_35%),radial-gradient(circle_at_70%_40%,#A259FF,transparent_35%),radial-gradient(circle_at_50%_70%,#ff6a6a,transparent_38%),radial-gradient(circle_at_80%_80%,#DEF767,transparent_30%)] opacity-30 blur-3xl" />
 
             <section className="relative z-10 mx-auto grid min-h-screen w-full max-w-5xl px-5 py-8 md:px-10 lg:grid-cols-[1fr_160px] lg:gap-8">
-                <div className="flex min-h-[calc(100vh-64px)] flex-col justify-between lg:max-w-[75%]">
+                <div className="flex min-h-[calc(100vh-64px)] flex-col lg:max-w-[75%]">
                     <header className="space-y-8">
                         <div className="flex items-start justify-between gap-6">
                             <div>
                                 <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">UXISM / LOGIN / 2026</p>
-                                <h1 className="mt-3 max-w-[10ch] font-sans text-[42px] uppercase leading-[0.92] tracking-[0.02em] text-white sm:text-[56px]">Return to System</h1>
+                                <h1 className="mt-3 max-w-[10ch] font-sans text-[40px] uppercase leading-[0.92] tracking-[0.02em] text-white sm:text-[56px]">Welcome to UXISM</h1>
                             </div>
-
-                            <button type="button" className="grid h-10 w-10 shrink-0 place-items-center rounded-[24px] border border-[#5b5b5b] bg-[#181818] text-[#929292] transition-colors active:border-[rgba(222,247,103,0.5)] active:text-[#DEF767] lg:hidden" aria-label="Open login map">
-                                <Plus size={18} />
-                            </button>
                         </div>
 
-                        <div className="space-y-3">
+                        <div className="space-y-2">
                             <div className="h-px w-full bg-[#2e2e2e]" />
                             <div className="h-px w-1/2 bg-[#DEF767]" />
                             <div className="flex items-center justify-between font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]">
-                                <span>01 / credential check</span>
+                                <span>credentials check</span>
                                 <span>AUTH</span>
                             </div>
                         </div>
                     </header>
-
-                    <div className="py-10 md:py-14">
+                    <div>
                         <AnimatePresence mode="wait">
                             {!submitted ? (
                                 <motion.form key="login-form" onSubmit={submitLogin} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -14 }} transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }} className="space-y-8">
                                     <div>
-                                        <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">Access Slab</p>
                                         <h2 className="mt-2 font-sans text-2xl uppercase tracking-[0.04em] text-white">Login</h2>
-                                        <p className="mt-3 max-w-md text-[13px] leading-6 text-[#929292]">Enter your registered credentials. The interface stays sparse; validation appears only when needed.</p>
                                     </div>
 
                                     <div className="space-y-4">
@@ -178,9 +185,6 @@ export default function UXISMLoginPage() {
                                                 </button>
                                             </div>
                                         </Field>
-
-
-
                                         {errors.general && (
                                             <motion.div
                                                 role="alert"
@@ -192,9 +196,6 @@ export default function UXISMLoginPage() {
                                                 {errors.general}
                                             </motion.div>
                                         )}
-
-
-                                        
                                     </div>
 
                                     <div className="flex items-center justify-between gap-4 border-y border-[#2e2e2e] py-4">
@@ -202,7 +203,7 @@ export default function UXISMLoginPage() {
                                             <span className={`grid h-5 w-5 place-items-center border ${form.remember ? "border-[#ff6a6a] bg-[#ff6a6a] text-[#171717]" : "border-[#5b5b5b] text-transparent"}`}>
                                                 <Check size={13} />
                                             </span>
-                                            <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292]">Remember access</span>
+                                            <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292]">Stay Logged in</span>
                                         </button>
 
                                         <button type="button" className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b] active:text-[#DEF767]">
@@ -212,7 +213,8 @@ export default function UXISMLoginPage() {
 
                                     <footer className="flex items-center justify-between gap-3 border-t border-[#2e2e2e] pt-5">
                                         <Link
-                                            href="/register"
+                                            // href="/register"
+                                            href={registerHref}
                                             className="grid h-11 place-items-center border border-[#2e2e2e] px-4 font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292] transition-colors active:border-[rgba(222,247,103,0.5)] active:text-[#DEF767]"
                                         >
                                             Create account
@@ -239,18 +241,7 @@ export default function UXISMLoginPage() {
                             )}
                         </AnimatePresence>
                     </div>
-
-                    <div className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]">x:20 / rail:protected / state:dark-first</div>
                 </div>
-
-                <aside className="pointer-events-none fixed bottom-6 right-5 hidden flex-col gap-4 lg:flex">
-                    <button type="button" className="pointer-events-auto grid h-10 w-10 place-items-center rounded-[24px] border border-[#5b5b5b] bg-[#181818] text-[#929292] active:border-[rgba(222,247,103,0.5)]">
-                        <Plus size={17} />
-                    </button>
-                    <button type="button" className="pointer-events-auto grid h-10 w-10 place-items-center rounded-[24px] border border-[rgba(222,247,103,0.5)] bg-[#181818] text-[#DEF767]">
-                        <ArrowRight size={17} />
-                    </button>
-                </aside>
             </section>
 
             <style jsx global>{`

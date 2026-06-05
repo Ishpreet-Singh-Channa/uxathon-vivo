@@ -30,11 +30,6 @@ export default function FlowMiniCard({ card, persona, index, label }: Props) {
       <div className={styles.contentWrapper}>
         <p className={styles.content}>{card.heading || card.bodyText || ''}</p>
       </div>
-      
-      <div className={styles.decorative}>
-        <div className={styles.line} />
-        <div className={styles.dots} />
-      </div>
     </div>
   );
 }

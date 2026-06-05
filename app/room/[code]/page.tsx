@@ -1,15 +1,21 @@
 'use client'
 
-import React, { use } from 'react'
+import React, { use, useEffect } from 'react'
 import { GameShell } from '@/app/games/_components/GameShell'
 import { useMultiplayer } from '@/lib/multiplayer/useMultiplayer'
 import { Lobby } from '@/components/multiplayer/Lobby'
 import { GameWrapper } from '@/components/multiplayer/GameWrapper'
+import { useRouter } from 'next/navigation'
+import {
+  autoJoinRoomFromRedirect,
+  rememberPendingRoom,
+} from '@/lib/room-invite'
+
 
 export default function RoomCodePage({ params }: { params: Promise<{ code: string }> }) {
   const resolvedParams = use(params)
   const code = resolvedParams.code.toUpperCase().trim()
-
+  const router = useRouter()
   const {
     userId,
     room,
@@ -22,6 +28,27 @@ export default function RoomCodePage({ params }: { params: Promise<{ code: strin
     updateGameState,
     leaveRoom,
   } = useMultiplayer(code)
+
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const token = localStorage.getItem('jwt-token')
+
+    if (!token) {
+      rememberPendingRoom(code)
+      router.replace(`/login?redirect=${encodeURIComponent(`/room/${code}`)}`)
+    }
+  }, [code, router])
+
+  useEffect(() => {
+    if (!userId) return
+
+    autoJoinRoomFromRedirect(`/room/${code}`).catch((err) => {
+      console.error('[Room Invite Auto Join Failed]', err)
+    })
+  }, [code, userId])
+  
 
   // Meta title and description based on room status
   const title = room?.status === 'in_game' ? 'Multiplayer Match' : 'Teammate Lobby'

@@ -3,7 +3,6 @@ import { useGame } from '@/store/gameStore';
 import { MOCK_DOMAINS } from '@/data/mockData';
 import { Domain } from '@/types';
 import styles from './DomainSelect.module.css';
-import { Play } from 'lucide-react';
 
 export default function DomainSelect() {
   const { state, dispatch } = useGame();
@@ -21,8 +20,6 @@ export default function DomainSelect() {
       <h1 className={styles.heading}>
         Select <span className={styles.accent}>Domain</span>
       </h1>
-      {/* <p className={styles.sub}>Choose your Domain to begin.</p> */}
-
       <div className={styles.grid}>
         {MOCK_DOMAINS.map((d, index) => {
           const domainTag = `D-${(index + 1).toString().padStart(2, '0')}`;
@@ -46,13 +43,6 @@ export default function DomainSelect() {
               <div className={styles.cardBody}>
                 <p className={styles.desc}>{d.description}</p>
               </div>
-
-              {/* Bottom Row: Play Button & Logo */}
-              {/* <div className={styles.cardFooter}>
-                <div className={styles.playBtn}>
-                  <Play size={12} fill="currentColor" />
-                </div>
-              </div> */}
 
               {/* Hover Accent Bar */}
               <div className={styles.accentBar} />

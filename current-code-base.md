@@ -3,53 +3,132 @@
 ### File: `apis/hasura/AppoloClient.tsx`
 
 ```tsx
+// "use client";
+// import { ApolloClient, InMemoryCache, HttpLink, ApolloLink } from "@apollo/client";
+// import { ApolloProvider } from "@apollo/client/react";
+// import { GraphQLWsLink } from "@apollo/client/link/subscriptions";
+// import { createClient } from "graphql-ws";
+// import { getMainDefinition } from "@apollo/client/utilities";
+
+// // Normal Query, mutation link
+// const httpLink = new HttpLink({
+//     // uri: "http://localhost:8100/v1/graphql",
+//     uri: "https://hasura.ubuntudevt65535.dpdns.org/v1/graphql", 
+//     fetch: async (uri, options) => {
+//         const token = localStorage.getItem("jwt-token");
+//         console.log("Token in fetch:", token);
+//         const headers = { ...(options?.headers || {}), Authorization: token ? `Bearer ${token}` : "" };
+//         return fetch(uri, { ...options, headers });
+//     },
+// });
+
+// // WebSocket link for subscriptions
+// const wsLink = new GraphQLWsLink(
+//     createClient({
+//         url: "wss://hasura.ubuntudevt65535.dpdns.org/v1/graphql",
+//         connectionParams: async () => {
+//             const token = localStorage.getItem("jwt-token");
+//             if (!token) window.location.href = "/login";
+//             return { headers: { Authorization: token ? `Bearer ${token}` : "" } };
+//         },
+//     }),
+// );
+
+// const link = ApolloLink.split(
+//     ({ query }) => {
+//         const definition = getMainDefinition(query);
+//         return definition.kind === "OperationDefinition" && definition.operation === "subscription";
+//     },
+//     wsLink,
+//     httpLink,
+// );
+
+// export const client = new ApolloClient({
+//     link,
+//     cache: new InMemoryCache(),
+// });
+
+// export function ApolloWrapper({ children }: { children: React.ReactNode }) {
+//     return <ApolloProvider client={client}>{children}</ApolloProvider>;
+// }
+
 "use client";
+
+import React from "react";
 import { ApolloClient, InMemoryCache, HttpLink, ApolloLink } from "@apollo/client";
 import { ApolloProvider } from "@apollo/client/react";
 import { GraphQLWsLink } from "@apollo/client/link/subscriptions";
 import { createClient } from "graphql-ws";
 import { getMainDefinition } from "@apollo/client/utilities";
 
-// Normal Query, mutation link
+const httpUri =
+  process.env.NEXT_PUBLIC_HASURA_HTTP_URL ||
+  "https://hasura.ubuntudevt65535.dpdns.org/v1/graphql";
+
+const wsUri =
+  process.env.NEXT_PUBLIC_HASURA_WS_URL ||
+  "wss://hasura.ubuntudevt65535.dpdns.org/v1/graphql";
+
+// Normal query/mutation link
 const httpLink = new HttpLink({
-    // uri: "http://localhost:8100/v1/graphql",
-    uri: "https://hasura.ubuntudevt65535.dpdns.org/v1/graphql", 
-    fetch: async (uri, options) => {
-        const token = localStorage.getItem("jwt-token");
-        console.log("Token in fetch:", token);
-        const headers = { ...(options?.headers || {}), Authorization: token ? `Bearer ${token}` : "" };
-        return fetch(uri, { ...options, headers });
-    },
+  uri: httpUri,
+  fetch: async (uri, options) => {
+    const token =
+      typeof window !== "undefined" ? localStorage.getItem("jwt-token") : null;
+
+    const headers = {
+      ...(options?.headers || {}),
+      Authorization: token ? `Bearer ${token}` : "",
+    };
+
+    return fetch(uri, {
+      ...options,
+      headers,
+    });
+  },
 });
 
 // WebSocket link for subscriptions
 const wsLink = new GraphQLWsLink(
-    createClient({
-        url: "wss://hasura.ubuntudevt65535.dpdns.org/v1/graphql",
-        connectionParams: async () => {
-            const token = localStorage.getItem("jwt-token");
-            if (!token) window.location.href = "/login";
-            return { headers: { Authorization: token ? `Bearer ${token}` : "" } };
+  createClient({
+    url: wsUri,
+    connectionParams: async () => {
+      const token =
+        typeof window !== "undefined" ? localStorage.getItem("jwt-token") : null;
+
+      if (!token && typeof window !== "undefined") {
+        window.location.href = "/login";
+      }
+
+      return {
+        headers: {
+          Authorization: token ? `Bearer ${token}` : "",
         },
-    }),
+      };
+    },
+  })
 );
 
 const link = ApolloLink.split(
-    ({ query }) => {
-        const definition = getMainDefinition(query);
-        return definition.kind === "OperationDefinition" && definition.operation === "subscription";
-    },
-    wsLink,
-    httpLink,
+  ({ query }) => {
+    const definition = getMainDefinition(query);
+
+    return (
+      definition.kind === "OperationDefinition" &&
+      definition.operation === "subscription"
+    );
+  },
+  wsLink,
+  httpLink
 );
 
 export const client = new ApolloClient({
-    link,
-    cache: new InMemoryCache(),
+  link,
+  cache: new InMemoryCache(),
 });
 
 export function ApolloWrapper({ children }: { children: React.ReactNode }) {
-    return <ApolloProvider client={client}>{children}</ApolloProvider>;
+  return <ApolloProvider client={client}>{children}</ApolloProvider>;
 }
 
 ```
@@ -1317,6 +1396,15 @@ export async function POST(req: Request) {
           profile_picture: string | null
         } | null
       }>
+       room_persona_claims: Array<{
+        user_id: string
+        domain_id: string
+        domain_name: string
+        domain_description: string | null
+        persona_id: string
+        persona_name: string
+        persona_hex: string
+      }>
       game_state?: {
         state: any
       } | null
@@ -1339,6 +1427,16 @@ export async function POST(req: Request) {
           }
         }
 
+        room_persona_claims(order_by: { claimed_at: asc }) {
+          user_id
+          domain_id
+          domain_name
+          domain_description
+          persona_id
+          persona_name
+          persona_hex
+        }
+
         game_state {
           state
         }
@@ -1357,46 +1455,180 @@ export async function POST(req: Request) {
     return Response.json({ error: 'Only the host can start bidding' }, { status: 403 })
   }
 
-  const teamsData = await hasuraAdminRequest<{
-    teams: Array<{
-      id: string
-      name: string
-      color: string | null
-      leader_id: string | null
-      persona_id: string | null
-      persona_name: string | null
-      persona_hex: string | null
-    }>
-  }>(
-    `query GetBiddingRoomTeams($roomId: uuid!) {
-      teams(where: { room_id: { _eq: $roomId } }) {
-        id
-        name
-        color
-        leader_id
-        persona_id
-        persona_name
-        persona_hex
-      }
-    }`,
-    { roomId: room.id }
-  )
+  if (room.status !== 'finished' && room.status !== 'in_game') {
+    return Response.json(
+      { error: 'Persona Flow must be completed in this room before bidding can start.' },
+      { status: 400 }
+    )
+  }
+
+
+
+  // replacing teamsData block with---------
+  // const teamsData = await hasuraAdminRequest<{
+  //   teams: Array<{
+  //     id: string
+  //     name: string
+  //     color: string | null
+  //     leader_id: string | null
+  //     persona_id: string | null
+  //     persona_name: string | null
+  //     persona_hex: string | null
+  //   }>
+  // }>(
+  //   `query GetBiddingRoomTeams($roomId: uuid!) {
+  //     teams(where: { room_id: { _eq: $roomId } }) {
+  //       id
+  //       name
+  //       color
+  //       leader_id
+  //       persona_id
+  //       persona_name
+  //       persona_hex
+  //     }
+  //   }`,
+  //   { roomId: room.id }
+  // )
+
+  // const teamIds = teamsData.teams.map((team) => team.id)
+
+  // if (teamIds.length === 0) {
+  //   return Response.json(
+  //     {
+  //       error: 'No teams found in this room. Run Persona Flow in this same room first.',
+  //       debug: {
+  //         roomId: room.id,
+  //         roomCode: room.code,
+  //         roomPlayerCount: room.room_players.length,
+  //       },
+  //     },
+  //     { status: 400 }
+  //   )
+  // }
+  // replacing teamsData block with---------
+  // this------------------------:
+
+  async function fetchRoomTeams(roomId: string) {
+    return hasuraAdminRequest<{
+      teams: Array<{
+        id: string
+        name: string
+        color: string | null
+        leader_id: string | null
+        persona_id: string | null
+        persona_name: string | null
+        persona_hex: string | null
+      }>
+    }>(
+      `query GetBiddingRoomTeams($roomId: uuid!) {
+        teams(where: { room_id: { _eq: $roomId } }) {
+          id
+          name
+          color
+          leader_id
+          persona_id
+          persona_name
+          persona_hex
+        }
+      }`,
+      { roomId }
+    )
+  }
+
+  let teamsData = await fetchRoomTeams(room.id)
+
+  if (teamsData.teams.length === 0 && room.room_persona_claims.length > 0) {
+    const teamObjects = room.room_persona_claims.map((claim) => ({
+      name: `${claim.persona_name} — ${claim.domain_name}`,
+      color: claim.persona_hex,
+      created_by: claim.user_id,
+      leader_id: claim.user_id,
+      room_id: room.id,
+      domain_id: claim.domain_id,
+      domain_name: claim.domain_name,
+      domain_description: claim.domain_description || '',
+      persona_id: claim.persona_id,
+      persona_name: claim.persona_name,
+      persona_hex: claim.persona_hex,
+    }))
+
+    await hasuraAdminRequest(
+      `mutation BackfillPersonaTeams($objects: [teams_insert_input!]!) {
+        insert_teams(
+          objects: $objects
+          on_conflict: {
+            constraint: teams_room_id_persona_id_key
+            update_columns: [
+              name
+              color
+              created_by
+              leader_id
+              domain_id
+              domain_name
+              domain_description
+              persona_name
+              persona_hex
+            ]
+          }
+        ) {
+          affected_rows
+        }
+      }`,
+      { objects: teamObjects }
+    )
+
+    teamsData = await fetchRoomTeams(room.id)
+  }
 
   const teamIds = teamsData.teams.map((team) => team.id)
+
+
+  const leaderMemberObjects = teamsData.teams
+    .filter((team) => team.leader_id)
+    .map((team) => ({
+      team_id: team.id,
+      user_id: team.leader_id,
+      member_type: 'LEADER',
+    }))
+
+  if (leaderMemberObjects.length > 0) {
+    await hasuraAdminRequest(
+      `mutation BackfillPersonaTeamLeaders($objects: [team_members_insert_input!]!) {
+        insert_team_members(
+          objects: $objects
+          on_conflict: {
+            constraint: team_members_pkey
+            update_columns: []
+          }
+        ) {
+          affected_rows
+        }
+      }`,
+      { objects: leaderMemberObjects }
+    )
+  }
 
   if (teamIds.length === 0) {
     return Response.json(
       {
-        error: 'No teams found in this room. Run Persona Flow in this same room first.',
+        error: 'No teams found in this room. Persona claims exist, but team backfill failed.',
         debug: {
           roomId: room.id,
           roomCode: room.code,
           roomPlayerCount: room.room_players.length,
+          claimsFound: room.room_persona_claims.length,
+          claims: room.room_persona_claims.map((claim) => ({
+            userId: claim.user_id,
+            personaId: claim.persona_id,
+            personaName: claim.persona_name,
+            domainName: claim.domain_name,
+          })),
         },
       },
       { status: 400 }
     )
   }
+  // this------------------------:
 
   const teamMembersData = await hasuraAdminRequest<{
     team_members: Array<{
@@ -1425,18 +1657,94 @@ export async function POST(req: Request) {
     { teamIds }
   )
 
-  const leaderMembers = teamMembersData.team_members.filter(
+  // const leaderMembers = teamMembersData.team_members.filter(
+  //   (member) => String(member.member_type).toUpperCase() === 'LEADER'
+  // )
+
+  // if (leaderMembers.length === 0) {
+  //   return Response.json(
+  //     {
+  //       error: 'No leaders found in this room. Persona Flow must create team_members with member_type LEADER.',
+  //       debug: {
+  //         roomId: room.id,
+  //         roomCode: room.code,
+  //         teamsFound: teamsData.teams.length,
+  //         teamMembersFound: teamMembersData.team_members.length,
+  //         memberTypesFound: teamMembersData.team_members.map((member) => ({
+  //           userId: member.user_id,
+  //           teamId: member.team_id,
+  //           memberType: member.member_type,
+  //         })),
+  //       },
+  //     },
+  //     { status: 400 }
+  //   )
+  // }
+
+
+  const explicitLeaderMembers = teamMembersData.team_members.filter(
     (member) => String(member.member_type).toUpperCase() === 'LEADER'
   )
+
+  const teamById = new Map(teamsData.teams.map((team) => [team.id, team]))
+
+  const playersById = new Map(
+    room.room_players.map((player) => [player.user_id, player])
+  )
+
+  // Build leaders from teams.leader_id first, then fallback to team_members.
+  const leaderRowsByUserId = new Map<
+    string,
+    {
+      user_id: string
+      team_id: string
+      user: {
+        id: string
+        name: string | null
+        profile_picture: string | null
+      } | null
+    }
+  >()
+
+  for (const team of teamsData.teams) {
+    if (!team.leader_id) continue
+
+    const player = playersById.get(team.leader_id)
+
+    leaderRowsByUserId.set(team.leader_id, {
+      user_id: team.leader_id,
+      team_id: team.id,
+      user: player?.user || null,
+    })
+  }
+
+  for (const member of explicitLeaderMembers) {
+    if (!member.user_id) continue
+
+    leaderRowsByUserId.set(member.user_id, {
+      user_id: member.user_id,
+      team_id: member.team_id,
+      user: member.user,
+    })
+  }
+
+  const leaderMembers = Array.from(leaderRowsByUserId.values())
 
   if (leaderMembers.length === 0) {
     return Response.json(
       {
-        error: 'No leaders found in this room. Persona Flow must create team_members with member_type LEADER.',
+        error: 'No leaders found in this room. Teams exist, but none have leader_id or team_members LEADER rows.',
         debug: {
           roomId: room.id,
           roomCode: room.code,
           teamsFound: teamsData.teams.length,
+          teams: teamsData.teams.map((team) => ({
+            teamId: team.id,
+            name: team.name,
+            leaderId: team.leader_id,
+            personaId: team.persona_id,
+            personaName: team.persona_name,
+          })),
           teamMembersFound: teamMembersData.team_members.length,
           memberTypesFound: teamMembersData.team_members.map((member) => ({
             userId: member.user_id,
@@ -1450,15 +1758,12 @@ export async function POST(req: Request) {
   }
 
 
-    
-    if (!room) {
-      return Response.json({ error: 'Room not found' }, { status: 404 })
-    }
-  const teamById = new Map(teamsData.teams.map((team) => [team.id, team]))
+  
+  // const teamById = new Map(teamsData.teams.map((team) => [team.id, team]))
 
-  const playersById = new Map(
-    room.room_players.map((player) => [player.user_id, player])
-  )
+  // const playersById = new Map(
+  //   room.room_players.map((player) => [player.user_id, player])
+  // )
 
   const leaderIds = new Set(leaderMembers.map((member) => member.user_id))
 
@@ -1627,6 +1932,7 @@ export async function POST(req: Request) {
     )
   }
 }
+
 
 ```
 
@@ -2320,14 +2626,17 @@ export async function POST(req: Request) {
 
   try {
     const roomData = await hasuraAdminRequest<{
-      rooms: Array<{
-        id: string
-        status: string
-        game_id: string
-        host_user_id: string
-        room_players: Array<{ user_id: string }>
-      }>
-    }>(
+    rooms: Array<{
+      id: string
+      status: string
+      game_id: string
+      host_user_id: string
+      room_players: Array<{ user_id: string }>
+      game_state?: {
+        state: any
+      } | null
+    }>
+  }>(
       `query GetPersonaRoom($code: String!) {
         rooms(where: { code: { _eq: $code } }) {
           id
@@ -2337,8 +2646,11 @@ export async function POST(req: Request) {
           room_players {
             user_id
           }
+          game_state {
+            state
+          }
         }
-      }`,
+      }  `,
       { code }
     )
 
@@ -2513,7 +2825,17 @@ export async function POST(req: Request) {
           }
           on_conflict: {
             constraint: teams_room_id_persona_id_key
-            update_columns: []
+            update_columns: [
+              name
+              color
+              created_by
+              leader_id
+              domain_id
+              domain_name
+              domain_description
+              persona_name
+              persona_hex
+            ]
           }
         ) {
           id
@@ -2532,6 +2854,12 @@ export async function POST(req: Request) {
         personaHex: body.persona.color_code,
       }
     )
+    console.log('[Persona Claim Team Result]', {
+      roomId: room.id,
+      userId,
+      personaId: body.persona.id,
+      teamResult,
+    })
 
     if (teamResult.insert_teams_one?.id) {
       await hasuraAdminRequest(
@@ -2573,6 +2901,9 @@ export async function POST(req: Request) {
     const claimCount = countData.room_persona_claims_aggregate.aggregate.count
     const gameEnded = claimCount >= 20
 
+    const previousState = room.game_state?.state || {}
+
+
     await hasuraAdminRequest(
       `mutation SyncPersonaGameState($roomId: uuid!, $state: jsonb!, $status: String!) {
         insert_game_state_one(
@@ -2598,17 +2929,21 @@ export async function POST(req: Request) {
       }`,
       {
         roomId: room.id,
-        status: gameEnded ? 'finished' : 'in_game',
+        status: 'in_game',
         state: {
+        ...previousState,
           personaFlow: {
+            ...(previousState.personaFlow || {}),
             claimCount,
             totalPersonas: 20,
             ended: gameEnded,
+            readyForBidding: gameEnded,
             lastClaim: insertedClaim,
           },
           logs: [
             `${body.persona.name} claimed by player ${userId.slice(0, 8)} in ${body.domain.name}`,
-          ],
+            ...(Array.isArray(previousState.logs) ? previousState.logs : []),
+          ].slice(0, 50),
         },
       }
     )
@@ -2909,7 +3244,7 @@ export default function DashboardPage() {
             {/* Footer Navigation bar layout definitions */}
             <nav className="fixed bottom-0 left-0 right-0 z-20 border-t border-[#2e2e2e] bg-[#181818]/95 h-16 flex items-center justify-around font-mono text-[10px]">
                 <button onClick={() => router.push("/myteam")} className="flex flex-col items-center text-[#FFFFFF]"> <Users size={16} /> TEAM </button>
-                <Link href="/x" className="flex flex-col items-center text-[#FFFFFF]"><Gem size={16} />X</Link>
+                <Link href="/x" className="flex flex-col items-center text-[#FFFFFF]"><Gem size={16} />Playground</Link>
                 <Link href="/games" className="flex flex-col items-center text-[#FFFFFF]"><Gamepad2 size={16} />GAMES LOUNGE</Link>
                 <Link href="/live" className="flex flex-col items-center text-[#FFFFFF]"><MessageCircle size={16} />LIVE STREAM</Link>
             </nav>
@@ -2977,11 +3312,11 @@ export function GameShell({ meta, title, description, children, variant = "defau
 
       <section className="relative z-10 mx-auto flex w-full max-w-lg flex-1 flex-col px-5 pb-28 pt-6 ${shellWidthClass}">
         <Link
-          href="/games"
+          href="/dashboard"
           className="mb-6 inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292] active:text-[#DEF767]"
         >
           <ArrowLeft size={14} aria-hidden />
-          Games lounge
+          Dashboard
         </Link>
         <div className="mb-6">
           <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">{meta}</p>
@@ -3137,6 +3472,47 @@ function formatTokens(value: number | string | null | undefined) {
   const numberValue = Number(value || 0);
   return numberValue.toLocaleString("en-IN");
 }
+
+// image
+function getProfileImageUrl(value: string | null | undefined) {
+  if (!value) return null
+
+  if (
+    value.startsWith('http://') ||
+    value.startsWith('https://') ||
+    value.startsWith('data:') ||
+    value.startsWith('blob:')
+  ) {
+    return value
+  }
+
+  if (value.startsWith('/')) {
+    return value
+  }
+
+  return `/${value}`
+}
+
+function getProfilePicture(person: any) {
+  return getProfileImageUrl(
+    person?.profilePicture ||
+      person?.profile_picture ||
+      person?.user?.profile_picture ||
+      null
+  )
+}
+
+function getInitials(name: string | null | undefined) {
+  const safeName = name || 'User'
+
+  return safeName
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('') || 'U'
+}
+// image
 
 function getJwt() {
   if (typeof window === "undefined") return null;
@@ -3484,15 +3860,15 @@ function CurrentAuctionPanel({
         <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1.2fr_0.8fr]">
           <div className="border border-[#2e2e2e] bg-[#181818] p-4">
             <div className="flex items-center gap-4">
-              {currentNominee.profilePicture ? (
+              {getProfilePicture(currentNominee) ? (
                 <img
-                  src={currentNominee.profilePicture}
-                  alt={currentNominee.name}
+                  src={getProfilePicture(currentNominee)!}
+                  alt={`${currentNominee.name || 'Member'} profile`}
                   className="h-16 w-16 rounded-full border border-[#2e2e2e] object-cover"
                 />
               ) : (
-                <div className="grid h-16 w-16 place-items-center rounded-full border border-[#2e2e2e] text-[#5b5b5b]">
-                  <UserRound size={28} />
+                <div className="grid h-16 w-16 place-items-center rounded-full border border-[#2e2e2e] bg-[#181818] font-mono text-sm text-[#5b5b5b]">
+                  {getInitials(currentNominee.name)}
                 </div>
               )}
 
@@ -4136,7 +4512,8 @@ function LeaderBoard({
       <div className="mt-4 space-y-2">
         {leaders.map((leader) => {
           const isCurrent = currentLeaderId === leader.userId;
-
+          const leaderPhoto = getProfilePicture(leader)
+          
           return (
             <div
               key={leader.userId}
@@ -4147,6 +4524,20 @@ function LeaderBoard({
               }`}
             >
               <div className="flex items-center justify-between gap-3">
+                
+                
+                {leaderPhoto ? (
+                  <img
+                    src={leaderPhoto}
+                    alt={`${leader.name || 'Leader'} profile`}
+                    className="h-10 w-10 rounded-full border border-[#2e2e2e] object-cover"
+                  />
+                ) : (
+                  <div className="grid h-10 w-10 place-items-center rounded-full border border-[#2e2e2e] bg-[#111] font-mono text-[11px] uppercase text-[#929292]">
+                    {getInitials(leader.name)}
+                  </div>
+                )}
+
                 <div>
                   <p className="font-sans text-sm uppercase tracking-[0.04em] text-white">
                     {leader.name}
@@ -4155,6 +4546,8 @@ function LeaderBoard({
                     {leader.teamName}
                   </p>
                 </div>
+
+
 
                 <div className="text-right">
                   <p className="font-mono text-[10px] text-[#DEF767]">
@@ -4959,231 +5352,12 @@ export default function NumberMemoryPage() {
 ### File: `app/games/page.tsx`
 
 ```tsx
-// "use client";
-
-// import Link from "next/link";
-// import { usePathname } from "next/navigation";
-// import { useState } from "react";
-// import {
-//     ArrowLeft,
-//     Brain,
-//     Gavel,
-//     Gamepad2,
-//     MessageCircle,
-//     Plus,
-//     Shapes,
-//     Sparkles,
-//     User,
-//     Users,
-//     Zap,
-//     type LucideIcon,
-// } from "lucide-react";
-
-// type Game = {
-//     id: string;
-//     title: string;
-//     description: string;
-//     meta: string;
-//     href: string | null;
-//     icon: LucideIcon;
-// };
-
-// const GAMES: Game[] = [
-//     {
-//         id: "signal-match",
-//         title: "chimp",
-//         description: "Pair live signals before the feed resets.",
-//         meta: "mode / memory",
-//         href: "/games/chimp",
-//         icon: Brain,
-//     },
-//     {
-//         id: "rapid-sketch",
-//         title: "number-memory",
-//         description: "Draw the prompt before the room times out.",
-//         meta: "mode / creative",
-//         href: "/games/number-memory",
-//         icon: Shapes,
-//     },
-//     {
-//         id: "pulse-poll",
-//         title: "sequence-memory",
-//         description: "Vote with the crowd on the fastest path.",
-//         meta: "mode / social",
-//         href: "/games/sequence-memory",
-//         icon: Zap,
-//     },
-//     {
-//         id: "spark-trivia",
-//         title: "reaction-time",
-//         description: "Answer streak questions from the event deck.",
-//         meta: "mode / quiz",
-//         href: "/games/reaction-time",
-//         icon: Sparkles,
-//     },
-// ];
-
-// const bottomNavItems = [
-//     { label: "My Team", href: "/myteam", icon: Users, enabled: true },
-//     { label: "Bidding", href: null, icon: Gavel, enabled: false },
-//     { label: "Games", href: "/games", icon: Gamepad2, enabled: true },
-//     { label: "Live Chat", href: "/live", icon: MessageCircle, enabled: true },
-// ];
-
-// export default function GamesPage() {
-//     const pathname = usePathname();
-//     const [selectedId, setSelectedId] = useState(GAMES[0].id);
-
-//     const selectedGame = GAMES.find((game) => game.id === selectedId) ?? GAMES[0];
-//     const canPlay = Boolean(selectedGame.href);
-
-//     return (
-//         <main className="relative flex min-h-screen flex-col overflow-hidden bg-[#181818] text-white selection:bg-[#ff6a6a] selection:text-[#171717]">
-//             <PageDecor />
-
-//             <header className="relative z-20 flex shrink-0 items-center justify-between border-b border-[#2e2e2e] bg-[#181818]/95 px-5 py-4 backdrop-blur-[2px]">
-//                 <Link
-//                     href="/dashboard"
-//                     className="flex h-10 items-center gap-2 border border-[#2e2e2e] px-4 font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292] active:border-[rgba(222,247,103,0.5)] active:text-[#DEF767]"
-//                 >
-//                     <ArrowLeft size={14} aria-hidden />
-//                     Dashboard
-//                 </Link>
-
-//                 <Link
-//                     href="/profile"
-//                     aria-label="Open profile"
-//                     className="grid h-10 w-10 place-items-center rounded-[24px] border border-[#5b5b5b] bg-[#181818] text-[#929292] active:border-[rgba(222,247,103,0.5)] active:text-[#DEF767]"
-//                 >
-//                     <User size={18} aria-hidden />
-//                 </Link>
-//             </header>
-
-//             <section className="relative z-10 mx-auto flex w-full max-w-lg flex-1 flex-col px-5 pb-36 pt-8">
-//                 <div className="mb-8">
-//                     <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">
-//                         UXATHON / GAMES / PLAY LOUNGE
-//                     </p>
-//                     <h1 className="mt-3 font-sans text-[32px] uppercase leading-[0.95] tracking-[0.02em] text-white sm:text-[40px]">
-//                         Choose a Game
-//                     </h1>
-//                     <p className="mt-4 max-w-[34ch] text-[13px] leading-6 text-[#929292]">
-//                         Select one of four room games. Routes will connect here when each game is ready.
-//                     </p>
-//                 </div>
-
-//                 <ul className="border border-[#2e2e2e]" role="listbox" aria-label="Available games">
-//                     {GAMES.map((game, index) => {
-//                         const Icon = game.icon;
-//                         const isSelected = game.id === selectedId;
-
-//                         return (
-//                             <li key={game.id} className={index > 0 ? "-mt-px" : undefined}>
-//                                 <button
-//                                     type="button"
-//                                     role="option"
-//                                     aria-selected={isSelected}
-//                                     onClick={() => setSelectedId(game.id)}
-//                                     className={`grid w-full min-h-[90px] grid-cols-[auto_1fr_auto] items-center gap-4 border border-[#2e2e2e] px-4 py-4 text-left transition-colors sm:px-5 ${isSelected
-//                                             ? "relative z-10 bg-[#ff6a6a] text-[#171717]"
-//                                             : "bg-[#181818] text-white active:bg-[#171717]"
-//                                         }`}
-//                                 >
-//                                     <span
-//                                         className={`grid h-11 w-11 place-items-center border ${isSelected ? "border-[#171717]/30" : "border-[#2e2e2e]"
-//                                             }`}
-//                                     >
-//                                         <Icon
-//                                             size={20}
-//                                             className={isSelected ? "text-[#171717]" : "text-[#929292]"}
-//                                             aria-hidden
-//                                         />
-//                                     </span>
-
-//                                     <span className="min-w-0">
-//                                         <span className="block font-sans text-[16px] uppercase tracking-[0.04em]">
-//                                             {game.title}
-//                                         </span>
-//                                         <span
-//                                             className={`mt-1 block truncate font-mono text-[10px] uppercase tracking-[0.14em] ${isSelected ? "text-[#171717]/70" : "text-[#5b5b5b]"
-//                                                 }`}
-//                                         >
-//                                             {game.meta}
-//                                         </span>
-//                                     </span>
-
-//                                     <Plus
-//                                         size={18}
-//                                         className={`shrink-0 transition-transform duration-200 ${isSelected ? "rotate-45 text-[#171717]" : "text-[#5b5b5b]"
-//                                             }`}
-//                                         aria-hidden
-//                                     />
-//                                 </button>
-//                             </li>
-//                         );
-//                     })}
-//                 </ul>
-
-//                 <div className="mt-6 border border-[#2e2e2e] bg-[#171717]/70 px-4 py-4 sm:px-5">
-//                     <p className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">selected</p>
-//                     <p className="mt-2 font-sans text-[18px] uppercase tracking-[0.04em] text-white">
-//                         {selectedGame.title}
-//                     </p>
-//                     <p className="mt-2 text-[13px] leading-6 text-[#929292]">{selectedGame.description}</p>
-//                 </div>
-//             </section>
-
-//             <div className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] left-0 right-0 z-20 px-5">
-//                 <div className="mx-auto max-w-lg">
-//                     {canPlay ? (
-//                         <Link
-//                             href={selectedGame.href!}
-//                             className="flex min-h-[58px] w-full items-center justify-center border border-[rgba(222,247,103,0.5)] bg-[#181818] font-mono text-[11px] uppercase tracking-[0.14em] text-[#DEF767] active:border-[#ff6a6a] active:bg-[#ff6a6a] active:text-[#171717]"
-//                         >
-//                             Play {selectedGame.title}
-//                         </Link>
-//                     ) : (
-//                         <button
-//                             type="button"
-//                             disabled
-//                             className="flex min-h-[58px] w-full cursor-not-allowed items-center justify-center border border-[#2e2e2e] bg-[#171717] font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]"
-//                             aria-disabled="true"
-//                         >
-//                             Play — route pending
-//                         </button>
-//                     )}
-//                 </div>
-//             </div>
-
-//             <nav
-//                 aria-label="Dashboard navigation"
-//                 className="fixed bottom-0 left-0 right-0 z-20 border-t border-[#2e2e2e] bg-[#181818]/95 backdrop-blur-[2px] pb-[max(0.75rem,env(safe-area-inset-bottom))]"
-//             >
-//             </nav>
-//         </main>
-//     );
-// }
-
-// function PageDecor() {
-//     return (
-//         <>
-//             <div className="pointer-events-none fixed inset-0 opacity-25 [background-image:radial-gradient(#5b5b5b_1px,transparent_1px)] [background-size:18px_18px]" />
-//             <div className="pointer-events-none fixed left-4 top-4 z-0 h-5 w-5 border-l border-t border-[#5b5b5b]" />
-//             <div className="pointer-events-none fixed right-4 top-4 z-0 h-5 w-5 border-r border-t border-[#5b5b5b]" />
-//             <div className="pointer-events-none fixed bottom-24 left-4 z-0 h-5 w-5 border-b border-l border-[#5b5b5b]" />
-//             <div className="pointer-events-none fixed bottom-24 right-4 z-0 h-5 w-5 border-b border-r border-[#5b5b5b]" />
-//             <div className="pointer-events-none fixed left-1/2 top-[-120px] h-[280px] w-[280px] -translate-x-1/2 rounded-full bg-[radial-gradient(circle_at_30%_30%,#46B1FF,transparent_35%),radial-gradient(circle_at_70%_40%,#A259FF,transparent_35%),radial-gradient(circle_at_50%_70%,#ff6a6a,transparent_38%),radial-gradient(circle_at_80%_80%,#DEF767,transparent_30%)] opacity-20 blur-3xl" />
-//         </>
-//     );
-// }
-
-
 "use client";
 
 import Link from "next/link";
 import { useState, useEffect } from "react";
 // import { ArrowLeft, Brain, Gamepad2, MessageCircle, Plus, Shapes, Sparkles, User, Users, Zap, type LucideIcon, X, Radio } from "lucide-react";
-import { ArrowLeft, Brain, Gamepad2, MessageCircle, Plus, Shapes, Sparkles, User, Users, Zap, Layers, type LucideIcon, X, Radio } from "lucide-react";
+import { ArrowLeft, Brain, Gamepad2, MessageCircle, Plus, Shapes, Sparkles, User, Users, Zap, type LucideIcon, X, Radio } from "lucide-react";
 import { useMultiplayer } from "@/lib/multiplayer/useMultiplayer";
 
 type Game = {
@@ -5200,14 +5374,6 @@ const GAMES: Game[] = [
     { id: "number-memory", title: "number-memory", description: "Draw the prompt before the room times out.", meta: "mode / creative", href: "/games/number-memory", icon: Shapes },
     { id: "sequence-memory", title: "sequence-memory", description: "Vote with the crowd on the fastest path.", meta: "mode / social", href: "/games/sequence-memory", icon: Zap },
     { id: "reaction-time", title: "reaction-time", description: "Answer streak questions from the event deck.", meta: "mode / quiz", href: "/games/reaction-time", icon: Sparkles },
-    { 
-        id: "persona-flow", 
-        title: "Persona Flow", 
-        description: "Draft identity matrices in a real-time race against synced nodes.", 
-        meta: "mode / strategy", 
-        href: "/games/persona-flow", 
-        icon: Layers // Import Layers from lucide-react
-    },
 ];
 
 export default function GamesPage() {
@@ -5223,15 +5389,12 @@ export default function GamesPage() {
                 <Link href="/dashboard" className="flex h-10 items-center gap-2 border border-[#2e2e2e] px-4 font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292]">
                     <ArrowLeft size={14} /> Dashboard
                 </Link>
-                <Link href="/profile" className="grid h-10 w-10 place-items-center rounded-[24px] border border-[#5b5b5b] text-[#929292]">
-                    <User size={18} />
-                </Link>
             </header>
 
             <section className="relative z-10 mx-auto flex w-full max-w-lg flex-1 flex-col px-5 pb-36 pt-8">
                 <div className="mb-8">
-                    <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">UXATHON / GAMES / LOUNGE</p>
-                    <h1 className="mt-3 font-sans text-[32px] uppercase tracking-[0.02em]">Choose operational mode</h1>
+                    <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">UXATHON / GAMING LOUNGE</p>
+                    <h1 className="mt-3 font-sans text-[30px] uppercase tracking-[0.02em]">Pick your challenge</h1>
                 </div>
 
                 <ul className="border border-[#2e2e2e]">
@@ -5337,17 +5500,44 @@ import GameBoard from "@/components/game/GameBoard/GameBoard";
 import Leaderboard from "@/components/views/Leaderboard/Leaderboard";
 import FABRail from "@/components/core/FABRail/FABRail";
 
+type PersonaFlowPageProps = {
+  isMultiplayer?: boolean
+  room?: any
+  roomId?: string
+  roomCode?: string
+  gameState?: any
+  updateGameState?: (state: any) => Promise<void>
+  players?: any[]
+  userId?: string | null
+  isHost?: boolean
+}
+
 // 1. The Bridge Logic (Expects the mode to be passed down)
-function PersonaFlowBridge({ isMultiplayer }: { isMultiplayer: boolean }) {
-  const { userId, room, gameState, updateGameState, activeRoomCode } = useMultiplayer();
-  const isMultiplayerActive = isMultiplayer && !!activeRoomCode;
+// function PersonaFlowBridge({ isMultiplayer }: { isMultiplayer: boolean }) {
+ 
+function PersonaFlowBridge({
+  isMultiplayer,
+  room,
+  roomCode,
+  gameState,
+  updateGameState,
+  players = [],
+  userId,
+}: PersonaFlowPageProps) { 
+  // const { userId, room, gameState, updateGameState, activeRoomCode } = useMultiplayer();
+  const isMultiplayerActive = !!isMultiplayer && !!room?.id;
 
   const { state, dispatch } = useGame();
-  const myExistingClaim = room?.room_persona_claims?.find(
+
+  const currentRoomClaims = React.useMemo(() => {
+      return Array.isArray(room?.room_persona_claims)
+        ? room.room_persona_claims
+        : [];
+    }, [room?.room_persona_claims]);
+  
+  const myExistingClaim = currentRoomClaims.find(
     (claim: any) => claim.user_id === userId
   );
-
-
 
 
 
@@ -5385,10 +5575,29 @@ function PersonaFlowBridge({ isMultiplayer }: { isMultiplayer: boolean }) {
 
     if (!shouldWatchForOutpaced) return;
 
-    const claim = room.room_persona_claims?.find(
-      (c: any) => c.persona_id === state.selectedPersona?.id
+    // const claim = room.room_persona_claims?.find(
+    //   (c: any) => c.persona_id === state.selectedPersona?.id
+    // );
+    const claim = currentRoomClaims.find(
+      (claim: any) =>
+        claim.room_id === room.id &&
+        claim.persona_id === state.selectedPersona?.id
     );
-
+// logs----------------------
+      console.log('[Persona Outpaced Check]', {
+      currentRoomId: room.id,
+      currentRoomCode: room.code,
+      selectedPersonaId: state.selectedPersona?.id,
+      userId,
+      claimsInCurrentRoom: currentRoomClaims.map((claim: any) => ({
+        roomId: claim.room_id,
+        userId: claim.user_id,
+        personaId: claim.persona_id,
+        name: claim.user?.name,
+      })),
+      matchedClaim: claim,
+    });
+// logs----------------------
     if (claim && claim.user_id !== userId) {
       dispatch({
         type: 'PERSONA_TAKEN_BY',
@@ -5397,18 +5606,20 @@ function PersonaFlowBridge({ isMultiplayer }: { isMultiplayer: boolean }) {
     }
   }, [
     isMultiplayerActive,
-    room?.room_persona_claims,
-    state.selectedPersona,
+    room?.id,
+    room?.code,
+    currentRoomClaims,
+    state.selectedPersona?.id,
     state.gamePhase,
     userId,
     dispatch,
   ]);
-
+  
 
   // Sync User Data Automatically in Multiplayer
   useEffect(() => {
     if (isMultiplayerActive && room && state.gamePhase === 'USER_SELECT') {
-      const me = room.room_players.find(p => p.user.id === userId);
+      const me = room.room_players.find((p:any) => p.user.id === userId);
       if (me) {
         dispatch({
           type: 'SET_USER',
@@ -5422,114 +5633,7 @@ function PersonaFlowBridge({ isMultiplayer }: { isMultiplayer: boolean }) {
       }
     }
   }, [isMultiplayerActive, room, state.gamePhase, userId, dispatch]);
-
-  // Broadcast Local Wins to the Multiplayer Matrix
-  // useEffect(() => {
-  //   if (isMultiplayerActive && state.gamePhase === 'WON' && state.personaClaimed) {
-  //     const syncClaim = async () => {
-  //       const currentClaims = gameState?.claims || {};
-  //       const currentLogs = gameState?.logs || [];
-
-  //       if (currentClaims[state.selectedPersona!.id] === userId) return;
-
-  //       await updateGameState({
-  //         ...gameState,
-  //         claims: {
-  //           ...currentClaims,
-  //           [state.selectedPersona!.id]: userId
-  //         },
-  //         logs: [
-  //           `Node ${state.currentUser?.username} secured persona: ${state.selectedPersona!.name}`,
-  //           ...currentLogs
-  //         ].slice(0, 20)
-  //       });
-  //     };
-  //     syncClaim();
-  //   }
-  // }, [
-  //   isMultiplayerActive,
-  //   state.gamePhase,
-  //   state.personaClaimed,
-  //   state.selectedPersona,
-  //   state.currentUser,
-  //   gameState,
-  //   updateGameState,
-  //   userId,
-  // ]);
-  useEffect(() => {
-    if (
-      !isMultiplayerActive ||
-      state.gamePhase !== 'WON' ||
-      !state.personaClaimed ||
-      !state.selectedPersona
-    ) {
-      return;
-    }
-
-    const syncClaim = async () => {
-      const currentClaims = gameState?.claims || {};
-      const currentLogs = gameState?.logs || [];
-
-      if (currentClaims[state.selectedPersona!.id] === userId) return;
-
-      await updateGameState({
-        ...gameState,
-        claims: {
-          ...currentClaims,
-          [state.selectedPersona!.id]: userId,
-        },
-        logs: [
-          `Node ${state.currentUser?.username} secured persona: ${state.selectedPersona!.name}`,
-          ...currentLogs,
-        ].slice(0, 20),
-      });
-    };
-
-    syncClaim();
-  }, [
-    isMultiplayerActive,
-    state.gamePhase,
-    state.personaClaimed,
-    state.selectedPersona,
-    state.currentUser,
-    gameState,
-    updateGameState,
-    userId,
-  ]);
-
-
-
-  // Listen for Rival Claims and Update Local State
-
-  // useEffect(() => {
-  //   if (isMultiplayerActive && gameState?.claims && state.selectedPersona) {
-  //     const claimedBy = gameState.claims[state.selectedPersona.id];
-
-  //     if (claimedBy && claimedBy !== userId) {
-  //       const rivalPlayer = room?.room_players.find(p => p.user.id === claimedBy);
-  //       dispatch({ 
-  //         type: 'PERSONA_TAKEN_BY', 
-  //         payload: rivalPlayer?.user.name || 'Rival Node' 
-  //       });
-  //     }
-  //   }
-  // }, [gameState?.claims, state.selectedPersona, userId, room, dispatch]);
-  useEffect(() => {
-    if (!isMultiplayerActive || !room || !state.selectedPersona || !userId) return;
-
-    const claim = room.room_persona_claims?.find(
-      (c: any) => c.persona_id === state.selectedPersona?.id
-    );
-
-    if (claim && claim.user_id !== userId) {
-      dispatch({
-        type: 'PERSONA_TAKEN_BY',
-        payload: claim.user?.name || 'Another player',
-      });
-    }
-  }, [isMultiplayerActive, room?.room_persona_claims, state.selectedPersona, userId, dispatch]);
-
-
+  
   if (isMultiplayerActive && myExistingClaim) {
     return (
       <div className="min-h-[420px] border border-[#2e2e2e] bg-[#171717]/70 p-6 text-center flex flex-col items-center justify-center">
@@ -5563,7 +5667,7 @@ function PersonaFlowBridge({ isMultiplayer }: { isMultiplayer: boolean }) {
     <div className="relative flex flex-col w-full h-full min-h-[600px] bg-[#181818] overflow-hidden rounded-xl border border-[#2e2e2e]">
       {/* {state.gamePhase === 'USER_SELECT' && <UserSelect />} */}
       {state.gamePhase === 'DOMAIN_SELECT' && <DomainSelect />}
-      {state.gamePhase === 'PERSONA_SELECT' && <PersonaSelect />}
+      {state.gamePhase === 'PERSONA_SELECT' && <PersonaSelect room={room}/>}
       {state.gamePhase === 'LEADERBOARD' && <Leaderboard />}
       {(state.gamePhase === 'PLAYING' ||
         state.gamePhase === 'WON' ||
@@ -5574,25 +5678,31 @@ function PersonaFlowBridge({ isMultiplayer }: { isMultiplayer: boolean }) {
 }
 
 // 2. The Inner Wrapper (Safe to use useSearchParams here)
-function PersonaFlowPageInner() {
+function PersonaFlowPageInner(props: PersonaFlowPageProps) {
   const searchParams = useSearchParams();
   const mode = searchParams.get("mode");
-  const isMultiplayer = mode !== "singleplayer";
+  // const isMultiplayer = mode !== "singleplayer";
+  const isMultiplayer =
+      typeof props.isMultiplayer === 'boolean'
+        ? props.isMultiplayer
+        : mode !== "singleplayer";
   return (
     <GameShell
       meta={`UXATHON / ENVIRONMENT / PERSONA FLOW / [${isMultiplayer ? "MULTIPLAYER" : "SINGLEPLAYER"}]`}
       title="Context Persona Flow"
       description="Navigate the matrix. Align archetypes to operational realities before your rivals."
     >
-      <GameProvider>
-        <PersonaFlowBridge isMultiplayer={isMultiplayer} />
+      <GameProvider key={props.roomId || props.roomCode || 'singleplayer'}>
+        <PersonaFlowBridge 
+        {...props} 
+        isMultiplayer={isMultiplayer} />
       </GameProvider>
     </GameShell>
   );
 }
 
 // 3. The Default Export (Provides the Suspense Boundary to prevent Next.js build crash)
-export default function PersonaFlowPage() {
+export default function PersonaFlowPage(props: PersonaFlowPageProps) {
   return (
     <Suspense
       fallback={
@@ -5601,7 +5711,7 @@ export default function PersonaFlowPage() {
         </div>
       }
     >
-      <PersonaFlowPageInner />
+      <PersonaFlowPageInner {...props}/>
     </Suspense>
   );
 }
@@ -6248,7 +6358,7 @@ export default function RootLayout({
             suppressHydrationWarning
             className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
             >
-            <body className="min-h-full flex flex-col">
+            <body className="min-h-full flex flex-col suppressHydrationWarning">
             <ApolloWrapper>
                 <AuthProvider>
                     {children}
@@ -6943,6 +7053,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ArrowRight, Eye, EyeOff, Plus, Check } from "lucide-react";
 import Field from "@/components/Field";
 import { useAuth } from "@/context/token-context";
+import Link from "next/link";
 
 type LoginForm = {
     email: string;
@@ -6962,8 +7073,17 @@ function validateEmail(email: string) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+    function getErrorMessage(error: unknown, fallback: string) {
+        if (error instanceof Error && error.message) return error.message;
+        if (typeof error === "string") return error;
+        return fallback;
+    }  
+
+
 function validateLogin(form: LoginForm): LoginErrors {
     const errors: LoginErrors = {};
+
+      
 
     if (!form.email.trim()) errors.email = "Email is required.";
     else if (!validateEmail(form.email)) errors.email = "Enter a valid email address.";
@@ -6985,31 +7105,44 @@ export default function UXISMLoginPage() {
     function updateField<K extends keyof LoginForm>(key: K, value: LoginForm[K]) {
         const nextForm = { ...form, [key]: value };
         setForm(nextForm);
-        setErrors((prevErrors) => ({ ...prevErrors, [key]: undefined }));
-        // setErrors(validateLogin(nextForm));
+        setErrors((prevErrors) => ({ 
+            ...prevErrors, 
+            [key]: undefined,
+            general: undefined,
+             }));
     }
 
-    function submitLogin(event: React.FormEvent<HTMLFormElement>) {
+    async function submitLogin(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault();
 
         const nextErrors = validateLogin(form);
         setErrors(nextErrors);
         if (Object.keys(nextErrors).length > 0) return;
 
-        const payload = {
-            email: form.email.trim() ? form.email : undefined,
-            password: form.password.trim() ? form.password : undefined,
-        };
+        if (!auth?.login) {
+            setErrors({
+                general: "Authentication service is not ready. Please refresh and try again.",
+            });
+            return;
+        }
 
         setLoading(true);
-        auth?.login({ email: payload.email, password: payload.password! })
-            .then(() => {
-                window.location.href = "/dashboard";
-            })
-            .catch((error) => {
-                setErrors({ general: error.message || "Login failed. Please try again." });
-            })
-            .finally(() => setLoading(false));
+        setErrors({});
+
+        try {
+            await auth.login({
+                email: form.email.trim(),
+                password: form.password,
+            });
+
+            window.location.href = "/dashboard";
+        } catch (error) {
+            setErrors({
+                general: getErrorMessage(error, "Login failed. Please check your credentials and try again."),
+            });
+        } finally {
+            setLoading(false);
+        }
     }
 
     return (
@@ -7024,37 +7157,30 @@ export default function UXISMLoginPage() {
             <div className="pointer-events-none fixed left-1/2 top-[-130px] h-[340px] w-[340px] -translate-x-1/2 rounded-full bg-[radial-gradient(circle_at_30%_30%,#46B1FF,transparent_35%),radial-gradient(circle_at_70%_40%,#A259FF,transparent_35%),radial-gradient(circle_at_50%_70%,#ff6a6a,transparent_38%),radial-gradient(circle_at_80%_80%,#DEF767,transparent_30%)] opacity-30 blur-3xl" />
 
             <section className="relative z-10 mx-auto grid min-h-screen w-full max-w-5xl px-5 py-8 md:px-10 lg:grid-cols-[1fr_160px] lg:gap-8">
-                <div className="flex min-h-[calc(100vh-64px)] flex-col justify-between lg:max-w-[75%]">
+                <div className="flex min-h-[calc(100vh-64px)] flex-col lg:max-w-[75%]">
                     <header className="space-y-8">
                         <div className="flex items-start justify-between gap-6">
                             <div>
                                 <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">UXISM / LOGIN / 2026</p>
-                                <h1 className="mt-3 max-w-[10ch] font-sans text-[42px] uppercase leading-[0.92] tracking-[0.02em] text-white sm:text-[56px]">Return to System</h1>
+                                <h1 className="mt-3 max-w-[10ch] font-sans text-[40px] uppercase leading-[0.92] tracking-[0.02em] text-white sm:text-[56px]">Welcome to UXISM</h1>
                             </div>
-
-                            <button type="button" className="grid h-10 w-10 shrink-0 place-items-center rounded-[24px] border border-[#5b5b5b] bg-[#181818] text-[#929292] transition-colors active:border-[rgba(222,247,103,0.5)] active:text-[#DEF767] lg:hidden" aria-label="Open login map">
-                                <Plus size={18} />
-                            </button>
                         </div>
 
-                        <div className="space-y-3">
+                        <div className="space-y-2">
                             <div className="h-px w-full bg-[#2e2e2e]" />
                             <div className="h-px w-1/2 bg-[#DEF767]" />
                             <div className="flex items-center justify-between font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]">
-                                <span>01 / credential check</span>
+                                <span>credentials check</span>
                                 <span>AUTH</span>
                             </div>
                         </div>
                     </header>
-
-                    <div className="py-10 md:py-14">
+                    <div>
                         <AnimatePresence mode="wait">
                             {!submitted ? (
                                 <motion.form key="login-form" onSubmit={submitLogin} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -14 }} transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }} className="space-y-8">
                                     <div>
-                                        <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">Access Slab</p>
                                         <h2 className="mt-2 font-sans text-2xl uppercase tracking-[0.04em] text-white">Login</h2>
-                                        <p className="mt-3 max-w-md text-[13px] leading-6 text-[#929292]">Enter your registered credentials. The interface stays sparse; validation appears only when needed.</p>
                                     </div>
 
                                     <div className="space-y-4">
@@ -7070,6 +7196,17 @@ export default function UXISMLoginPage() {
                                                 </button>
                                             </div>
                                         </Field>
+                                        {errors.general && (
+                                            <motion.div
+                                                role="alert"
+                                                initial={{ opacity: 0, y: -6 }}
+                                                animate={{ opacity: 1, y: 0 }}
+                                                className="border border-[#ff6a6a]/30 bg-[#ff6a6a]/5 px-4 py-3 font-mono text-[11px] uppercase tracking-[0.1em] text-[#ff6a6a]"
+                                            >
+                                                <span className="mr-2 opacity-50">AUTH ERROR:</span>
+                                                {errors.general}
+                                            </motion.div>
+                                        )}
                                     </div>
 
                                     <div className="flex items-center justify-between gap-4 border-y border-[#2e2e2e] py-4">
@@ -7077,7 +7214,7 @@ export default function UXISMLoginPage() {
                                             <span className={`grid h-5 w-5 place-items-center border ${form.remember ? "border-[#ff6a6a] bg-[#ff6a6a] text-[#171717]" : "border-[#5b5b5b] text-transparent"}`}>
                                                 <Check size={13} />
                                             </span>
-                                            <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292]">Remember access</span>
+                                            <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292]">Stay Logged in</span>
                                         </button>
 
                                         <button type="button" className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b] active:text-[#DEF767]">
@@ -7086,13 +7223,21 @@ export default function UXISMLoginPage() {
                                     </div>
 
                                     <footer className="flex items-center justify-between gap-3 border-t border-[#2e2e2e] pt-5">
-                                        <button type="button" className="h-11 border border-[#2e2e2e] px-4 font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292] active:border-[rgba(222,247,103,0.5)] active:text-[#DEF767]">
+                                        <Link
+                                            href="/register"
+                                            className="grid h-11 place-items-center border border-[#2e2e2e] px-4 font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292] transition-colors active:border-[rgba(222,247,103,0.5)] active:text-[#DEF767]"
+                                        >
                                             Create account
-                                        </button>
-
-                                        <button type="submit" className={`flex h-11 items-center gap-2 ${loading ? "bg-[#c6bbbb]" : "bg-[#ff6a6a]"} px-5 font-mono text-[11px] uppercase tracking-[0.14em] text-[#171717]`}>
-                                            Login <ArrowRight size={15} />
-                                        </button>
+                                        </Link>
+                                        <button
+                                        type="submit"
+                                        disabled={loading}
+                                        className={`flex h-11 items-center gap-2 px-5 font-mono text-[11px] uppercase tracking-[0.14em] text-[#171717] transition-opacity disabled:cursor-not-allowed disabled:opacity-60 ${
+                                            loading ? "bg-[#c6bbbb]" : "bg-[#ff6a6a]"
+                                        }`}
+                                    >
+                                        {loading ? "Checking..." : "Login"} {!loading && <ArrowRight size={15} />}
+                                    </button>
                                     </footer>
                                 </motion.form>
                             ) : (
@@ -7106,8 +7251,6 @@ export default function UXISMLoginPage() {
                             )}
                         </AnimatePresence>
                     </div>
-
-                    <div className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]">x:20 / rail:protected / state:dark-first</div>
                 </div>
 
                 <aside className="pointer-events-none fixed bottom-6 right-5 hidden flex-col gap-4 lg:flex">
@@ -8598,10 +8741,73 @@ import {
     Mail, Lock, Phone, Cpu, Camera
 } from "lucide-react";
 
+
+type RegisterField =
+    | "name"
+    | "email"
+    | "password"
+    | "phone"
+    | "company"
+    | "skills"
+    | "avatar"
+    | "general";
+
+type RegisterErrors = Partial<Record<RegisterField, string>>;
+
+function validateEmail(email: string) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+    if (error instanceof Error && error.message) return error.message;
+    if (typeof error === "string") return error;
+    return fallback;
+}
+
+function validateRegisterForm(values: {
+    name: string;
+    email: string;
+    password: string;
+    phone: string;
+    company: string;
+    skillsRaw: string;
+}) {
+    const errors: RegisterErrors = {};
+
+    if (!values.name.trim()) errors.name = "Full name is required.";
+    else if (values.name.trim().length < 2) errors.name = "Name must be at least 2 characters.";
+
+    if (!values.email.trim()) errors.email = "Email is required.";
+    else if (!validateEmail(values.email.trim())) errors.email = "Enter a valid email address.";
+
+    if (!values.password) errors.password = "Password is required.";
+    else if (values.password.length < 8) errors.password = "Password must be at least 8 characters.";
+
+    if (!values.phone.trim()) errors.phone = "Phone number is required.";
+    else if (!/^[0-9+\-\s()]{7,15}$/.test(values.phone.trim())) errors.phone = "Enter a valid phone number.";
+
+    if (!values.company.trim()) errors.company = "Affiliation is required.";
+
+    if (!values.skillsRaw.trim()) errors.skills = "Add at least one skill.";
+    else if (
+        values.skillsRaw
+            .split(",")
+            .map((skill) => skill.trim())
+            .filter(Boolean).length === 0
+    ) {
+        errors.skills = "Add at least one valid skill.";
+    }
+
+    return errors;
+}
+
+
+
+
 export default function RegisterPage() {
     const { register } = useAuth();
     const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const [errors, setErrors] = useState<RegisterErrors>({});// const [error, setError] = useState<string | null>(null);
 
     // New state for media upload
     const [avatarBase64, setAvatarBase64] = useState<string>("");
@@ -8627,8 +8833,11 @@ export default function RegisterPage() {
                     setAvatarBase64(reader.result as string);
                 };
                 reader.readAsDataURL(blob);
-            } catch (err) {
-                console.error("Failed to load default avatar sequence:", err);
+            } catch {
+                setErrors((prev) => ({
+                    ...prev,
+                    avatar: "Default avatar could not be loaded. You can still upload one manually.",
+                }));
             }
         };
 
@@ -8639,8 +8848,23 @@ export default function RegisterPage() {
     const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
+        setErrors((prev) => ({ ...prev, avatar: undefined, general: undefined }));
+
         if (!file.type.startsWith("image/")) {
-            setError("Please upload a valid image file.");
+            // setError("Please upload a valid image file.");
+            setErrors((prev) => ({
+                ...prev,
+                avatar: "Please upload a valid image file.",
+            }));
+            return;
+        }
+
+        const maxSizeInMb = 2;
+        if (file.size > maxSizeInMb * 1024 * 1024) {
+            setErrors((prev) => ({
+                ...prev,
+                avatar: `Profile image must be smaller than ${maxSizeInMb}MB.`,
+            }));
             return;
         }
 
@@ -8653,7 +8877,11 @@ export default function RegisterPage() {
         };
 
         reader.onerror = () => {
-            setError("Failed to read selected image.");
+            // setError("Failed to read selected image.");
+            setErrors((prev) => ({
+                ...prev,
+                avatar: "Failed to read selected image.",
+            }));
         };
 
         reader.readAsDataURL(file);
@@ -8670,16 +8898,41 @@ export default function RegisterPage() {
 
     const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();
-        setIsLoading(true);
-        setError(null);
+        // setIsLoading(true);
+        // setError(null);
+
+
+        if (!register) {
+            setErrors({
+                general: "Registration service is not ready. Please refresh and try again.",
+            });
+            return;
+        }
 
         const formData = new FormData(e.currentTarget);
-        const name = formData.get("name") as string;
-        const email = formData.get("email") as string;
-        const password = formData.get("password") as string;
-        const phone = formData.get("phone") as string;
-        const company = formData.get("company") as string;
-        const skillsRaw = formData.get("skills") as string;
+        const name = formData.get("name") as "";
+        const email = formData.get("email") as "";
+        const password = formData.get("password") as "";
+        const phone = formData.get("phone") as "";
+        const company = formData.get("company") as "";
+        const skillsRaw = formData.get("skills") as "";
+
+        const nextErrors = validateRegisterForm({
+            name,
+            email,
+            password,
+            phone,
+            company,
+            skillsRaw,
+        });
+
+        if (Object.keys(nextErrors).length > 0) {
+            setErrors(nextErrors);
+            return;
+        }
+
+        setIsLoading(true);
+        setErrors({});
 
         try {
             await register({
@@ -8701,11 +8954,11 @@ export default function RegisterPage() {
                 const existingProfile = localStorage.getItem(PROFILE_STORAGE_KEY);
                 if (!existingProfile) {
                     const dummyProfile = {
-                        name: name || "",
-                        email: email || "",
-                        phone: phone || "",
-                        company: company || "",
-                        skills: skillsRaw || "",
+                        name: name.trim(),
+                        email: email.trim(),
+                        phone: phone.trim(),
+                        company: company.trim(),
+                        skills: skillsRaw,
                         // Use the base64 avatar for local storage as well
                         avatarUrl: avatarBase64 || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(name || "UX")}`,
                     };
@@ -8715,7 +8968,9 @@ export default function RegisterPage() {
 
             window.location.href = "/dashboard";
         } catch (err: Error | unknown) {
-            setError((err as Error).message || "Registration protocol failed.");
+            setErrors({
+                general: getErrorMessage(err, "Registration failed. Please check your details and try again."),
+            });        
         } finally {
             setIsLoading(false);
         }
@@ -8802,21 +9057,93 @@ export default function RegisterPage() {
                                 <p className="mt-4 font-mono text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b] group-hover/avatar:text-[#DEF767] transition-colors">
                                     [ Click to Upload your Profile Pic ]
                                 </p>
+
+                                {errors.avatar && (
+                                    <p className="mt-3 font-mono text-[10px] uppercase tracking-[0.12em] text-[#ff6a6a]">
+                                        {errors.avatar}
+                                    </p>
+                                )}
                             </div>
 
-                            <RegisterInput label="Full Name" name="name" type="text" placeholder="J. DOE" icon={<UserPlus size={16} />} required />
-                            <RegisterInput label="Email" name="email" type="email" placeholder="abc@gmail.com" icon={<Mail size={16} />} required />
-                            <RegisterInput label="Password" name="password" type="password" placeholder="••••••••" icon={<Lock size={16} />} required />
+                            
+                            <RegisterInput
+                                label="Full Name"
+                                name="name"
+                                type="text"
+                                placeholder="J. DOE"
+                                icon={<UserPlus size={16} />}
+                                required
+                                error={errors.name}
+                                onChange={() => setErrors((prev) => ({ ...prev, name: undefined, general: undefined }))}
+                            />
+
+                            <RegisterInput
+                                label="Email"
+                                name="email"
+                                type="email"
+                                placeholder="abc@gmail.com"
+                                icon={<Mail size={16} />}
+                                required
+                                error={errors.email}
+                                onChange={() => setErrors((prev) => ({ ...prev, email: undefined, general: undefined }))}
+                            />
+
+                            <RegisterInput
+                                label="Password"
+                                name="password"
+                                type="password"
+                                placeholder="••••••••"
+                                icon={<Lock size={16} />}
+                                required
+                                error={errors.password}
+                                onChange={() => setErrors((prev) => ({ ...prev, password: undefined, general: undefined }))}
+                            />
+
                             <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-[#2e2e2e]">
-                                <RegisterInput label="Phone Number" name="phone" type="tel" placeholder="987********" icon={<Phone size={16} />} required />
-                                <RegisterInput label="Affiliation" name="company" type="text" placeholder="CORPORATION / ORG" icon={<Briefcase size={16} />} required />
+                                <RegisterInput
+                                    label="Phone Number"
+                                    name="phone"
+                                    type="tel"
+                                    placeholder="987********"
+                                    icon={<Phone size={16} />}
+                                    required
+                                    error={errors.phone}
+                                    onChange={() => setErrors((prev) => ({ ...prev, phone: undefined, general: undefined }))}
+                                />
+
+                                <RegisterInput
+                                    label="Affiliation"
+                                    name="company"
+                                    type="text"
+                                    placeholder="CORPORATION / ORG"
+                                    icon={<Briefcase size={16} />}
+                                    required
+                                    error={errors.company}
+                                    onChange={() => setErrors((prev) => ({ ...prev, company: undefined, general: undefined }))}
+                                />
                             </div>
-                            <RegisterInput label="Skills" name="skills" type="text" placeholder="UI, UX...(COMMA SEPARATED)" icon={<Cpu size={16} />} required />
+
+                            <RegisterInput
+                                label="Skills"
+                                name="skills"
+                                type="text"
+                                placeholder="UI, UX...(COMMA SEPARATED)"
+                                icon={<Cpu size={16} />}
+                                required
+                                error={errors.skills}
+                                onChange={() => setErrors((prev) => ({ ...prev, skills: undefined, general: undefined }))}
+                            />
                         </div>
 
-                        {error && (
-                            <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="mt-6 border border-[#ff6a6a]/30 bg-[#ff6a6a]/5 px-4 py-3 font-mono text-[11px] uppercase tracking-[0.1em] text-[#ff6a6a]">
-                                <span className="mr-2 opacity-50">ERROR:</span> {error}
+                        {errors.general && (
+                            <motion.div
+                                role="alert"
+                                initial={{ opacity: 0, x: -10 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                className="mt-6 border border-[#ff6a6a]/30 bg-[#ff6a6a]/5 px-4 py-3 font-mono text-[11px] uppercase tracking-[0.1em] text-[#ff6a6a]"
+                            >
+                                <span className="mr-2 opacity-50">REGISTRATION ERROR:</span>
+                                {errors.general}
                             </motion.div>
                         )}
 
@@ -8827,7 +9154,7 @@ export default function RegisterPage() {
                                         <div className="h-4 w-4 animate-spin border-2 border-[#171717] border-t-transparent rounded-full" />
                                     ) : (
                                         <>
-                                            Initialize Protocol
+                                            Register
                                             <ShieldCheck size={18} />
                                         </>
                                     )}
@@ -8865,16 +9192,64 @@ export default function RegisterPage() {
     );
 }
 
-function RegisterInput({ label, name, type, placeholder, icon, required }: { label: string; name: string; type: string; placeholder: string; icon: React.ReactNode; required?: boolean }) {
+function RegisterInput({
+    label,
+    name,
+    type,
+    placeholder,
+    icon,
+    required,
+    error,
+    onChange,
+}: {
+    label: string;
+    name: string;
+    type: string;
+    placeholder: string;
+    icon: React.ReactNode;
+    required?: boolean;
+    error?: string;
+    onChange?: () => void;
+}) {
     return (
         <div className="relative group/field px-6 py-5 hover:bg-[#1a1a1a] transition-colors">
-            <label className="block font-mono text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b] mb-3 group-focus-within/field:text-[#DEF767] transition-colors">{label}</label>
+            <label className="block font-mono text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b] mb-3 group-focus-within/field:text-[#DEF767] transition-colors">
+                {label}
+            </label>
+
             <div className="relative flex items-center gap-4">
-                <div className="text-[#5b5b5b] group-focus-within/field:text-[#DEF767] transition-colors">{icon}</div>
-                <input name={name} type={type} required={required} placeholder={placeholder} className="w-full bg-transparent font-mono text-[13px] text-white outline-none placeholder:text-[#2e2e2e]" />
+                <div className={`${error ? "text-[#ff6a6a]" : "text-[#5b5b5b] group-focus-within/field:text-[#DEF767]"} transition-colors`}>
+                    {icon}
+                </div>
+
+                <input
+                    name={name}
+                    type={type}
+                    required={required}
+                    placeholder={placeholder}
+                    onChange={onChange}
+                    aria-invalid={Boolean(error)}
+                    aria-describedby={error ? `${name}-error` : undefined}
+                    className="w-full bg-transparent font-mono text-[13px] text-white outline-none placeholder:text-[#2e2e2e]"
+                />
             </div>
-            {/* Focus Indicator Accent */}
-            <div className="absolute left-0 top-0 bottom-0 w-[2px] bg-[#DEF767] scale-y-0 group-focus-within/field:scale-y-100 transition-transform duration-300 origin-top" />
+
+            {error && (
+                <p
+                    id={`${name}-error`}
+                    className="mt-3 font-mono text-[10px] uppercase tracking-[0.12em] text-[#ff6a6a]"
+                >
+                    {error}
+                </p>
+            )}
+
+            <div
+                className={`absolute left-0 top-0 bottom-0 w-[2px] origin-top transition-transform duration-300 ${
+                    error
+                        ? "scale-y-100 bg-[#ff6a6a]"
+                        : "scale-y-0 bg-[#DEF767] group-focus-within/field:scale-y-100"
+                }`}
+            />
         </div>
     );
 }
@@ -8919,23 +9294,6 @@ export default function RoomCodePage({ params }: { params: Promise<{ code: strin
       : 'Invite other players using the lobby code. Prepare to launch.'
   const shellVariant =
     room?.game_id === "bidding" && isHost ? "stage" : "default";
-  // if (loading) {
-  //   return (
-  //     <GameShell 
-  //       meta="UXISM / MULTIPLAYER / LOADING" 
-  //       title="Syncing..." 
-  //       description="Connecting to signal..." 
-  //       variant={room?.game_id === "bidding" && isHost ? "stage" : "default"}>
-        
-  //       <div className="flex h-48 items-center justify-center">
-  //         <div className="h-6 w-6 animate-spin rounded-full border-2 border-[#ff6a6a] border-t-transparent"></div>
-  //         <span className="ml-3 font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292]">
-  //           Connecting to session...
-  //         </span>
-  //       </div>
-  //     </GameShell>
-  //   )
-  // }
   if (loading) {
     return (
       <GameShell
@@ -8998,44 +9356,6 @@ export default function RoomCodePage({ params }: { params: Promise<{ code: strin
     )
   }
   
-
-
-
-//   if (room.status === 'finished') {
-//   const isBidding = room.game_id === "bidding";
-//   return (
-//     <GameShell
-//       meta={`UXISM / ROOM / ${code}`}
-//       // title="Game Ended"
-//       title={isBidding ? "Bidding Ended" : "Game Ended"}
-//       // description="All personas have been assigned."
-//       description={isBidding ? "All available members have been assigned." : "The game session has ended."}
-//     >
-//       <div className="border border-[#2e2e2e] bg-[#171717]/70 p-6 text-center space-y-4">
-//         <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#DEF767]">
-//           {isBidding ? "The bidding game has ended." : "The game has ended."}
-//         </p>
-
-//         // <p className="text-[13px] leading-6 text-[#929292]">
-//         //   All 20 persona teams have been created.
-//         // </p>
-//         <p className="text-[13px] leading-6 text-[#929292]">
-//           {isBidding
-//             ? "All available non-leader members have been assigned to teams."
-//             : "The current room session is complete."}
-//         </p>
-
-//         <button
-//           type="button"
-//           onClick={leaveRoom}
-//           className="px-4 py-2 border border-[#2e2e2e] font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292]"
-//         >
-//           Return to Dashboard
-//         </button>
-//       </div>
-//     </GameShell>
-//   )
-// }
 
 
   if (room.status === 'finished') {
@@ -10267,7 +10587,6 @@ const EVENTS = [
         id: "persona-race",
         type: "GAME",
         title: "Persona Race",
-        tag: "X-04",
         description: "Sort through the architectural archetypes to define your operational stance. Restraint is a value; density is earned.",
         icon: <Zap className="text-[#DEF767]" size={20} />,
         status: "ACTIVE",
@@ -10277,7 +10596,6 @@ const EVENTS = [
         id: "event-bidding",
         type: "BIDDING",
         title: "Event Biddings",
-        tag: "X-07",
         description: "Participate in high-stakes auctions to secure elite personnel. Winners gain the right to buy their team members first.",
         icon: <Gavel className="text-[#ff6a6a]" size={20} />,
         status: "LOCKED",
@@ -10339,18 +10657,12 @@ export default function EventHubPage() {
 
             {/* Header */}
             <header className="relative z-10 pt-4 px-6 sm:px-12 max-w-4xl flex flex-col items-center text-center">
-                {/* <div className="flex items-center gap-3 mb-4">
-                    <div className="h-[1px] w-12 bg-[#2e2e2e]" />
-                    <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b]">Operational Hub / {transId}</span>
-                    <div className="h-[1px] w-12 bg-[#2e2e2e]" />
-                </div> */}
-
                 <h1 className="font-serif text-[clamp(2.5rem,8vw,4rem)] uppercase leading-[0.9] tracking-tight">
-                    Event <span className="text-[#DEF767]">Terminal</span>
+                    Event <span className="text-[#DEF767]">Playground</span>
                 </h1>
 
-                <p className="mt-8 font-sans text-[13px] leading-relaxed text-[#929292] max-w-[45ch]">
-                    Select a module to initiate the protocol. Each event is a singular node in the UXISM architecture.
+                <p className="mt-8 font-sans text-[15px] leading-relaxed text-[#929292] max-w-[45ch]">
+                    Play the games before everyone else joins in a competetive room.
                 </p>
             </header>
 
@@ -10373,12 +10685,6 @@ export default function EventHubPage() {
                             }}
                         />
                     ))}
-                </div>
-
-                {/* Technical Footnote */}
-                <div className="mt-12 font-mono text-[9px] text-[#5b5b5b] uppercase tracking-widest flex items-center justify-center gap-4">
-                    <Cpu size={12} />
-                    <span>System Status: Optimal / {EVENTS.length} Nodes Online</span>
                 </div>
             </section>
 
@@ -10491,7 +10797,6 @@ function EventRow({ event, index, onSelect }: { event: typeof EVENTS[0], index: 
                     {event.icon}
                 </div>
                 <div className="text-left">
-                    <div className="font-mono text-[9px] text-[#5b5b5b] mb-1">{event.tag}</div>
                     <h3 className="font-serif text-lg uppercase tracking-wider text-white group-hover:text-[#DEF767] transition-colors">
                         {event.title}
                     </h3>
@@ -10508,7 +10813,6 @@ function EventRow({ event, index, onSelect }: { event: typeof EVENTS[0], index: 
                         }`}>
                         {event.status}
                     </span>
-                    <span className="text-[8px] font-mono text-[#5b5b5b] mt-1">{event.coord}</span>
                 </div>
                 <div className={`h-8 w-8 rounded-full grid place-items-center border transition-all ${isLocked ? "border-[#2e2e2e]" : "border-[#5b5b5b] group-hover:border-[#DEF767] group-hover:bg-[#DEF767] group-hover:text-[#171717]"
                     }`}>
@@ -10521,6 +10825,7 @@ function EventRow({ event, index, onSelect }: { event: typeof EVENTS[0], index: 
         </motion.div>
     );
 }
+
 ```
 
 ---
@@ -11352,6 +11657,7 @@ export const CARD_TYPE_SLOT_MAP: Record<CardType, SlotKey> = {
   CX_PROBLEM: 'CX_PROBLEM',
   AI_PROBLEM: 'AI_PROBLEM',
 };
+
 ```
 
 ---
@@ -12125,6 +12431,8 @@ export default function FABRail() {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  margin-left: auto;
+  
 }
 
 .layoutToggle {
@@ -12185,6 +12493,7 @@ export default function FABRail() {
 'use client';
 import { useGame } from '@/store/gameStore';
 import styles from './TopBar.module.css';
+import { ArrowLeft } from "lucide-react";
 
 export default function TopBar() {
   const { state, dispatch } = useGame();
@@ -12199,7 +12508,7 @@ export default function TopBar() {
         onClick={() => dispatch({ type: 'GO_TO_PHASE', payload: 'PERSONA_SELECT' })}
         aria-label="Back to persona selection"
       >
-        ←
+        <ArrowLeft size={14} />
       </button>
 
       <div className={styles.breadcrumb}>
@@ -12209,17 +12518,7 @@ export default function TopBar() {
           {selectedPersona?.name}
         </span>
       </div>
-
-      {/* Progress pips — center */}
-      <div className={styles.center} aria-label={`${filled} of 7 slots filled`}>
-        {[0,1,2,3,4,5,6].map(i => (
-          <span
-            key={i}
-            className={`${styles.pip} ${i < filled ? styles.pipFilled : ''}`}
-            aria-hidden="true"
-          />
-        ))}
-      </div>
+  
 
       <div className={styles.right}>
         <span className={styles.oppLabel} aria-live="polite">
@@ -12338,11 +12637,11 @@ export default function TryAgainPopup() {
               </div>
 
               <h3 className="font-serif text-3xl uppercase tracking-tighter text-white mb-4">
-                Flow <span className="text-[#ff6a6a]">Dissonance</span>
+                Flow <span className="text-[#ff6a6a]">Incorrect</span>
               </h3>
               
               <p className="font-sans text-[13px] text-[#929292] leading-relaxed mb-10 max-w-[28ch]">
-                The current architectural alignment does not match the target persona. Dual-link failure detected.
+                Your current persona card alignment does not match the target persona.
               </p>
 
               <div className="flex flex-col w-full gap-3">
@@ -12351,19 +12650,15 @@ export default function TryAgainPopup() {
                   className="group flex items-center justify-center gap-3 w-full h-12 bg-[#ff6a6a] text-[#171717] font-mono text-[11px] uppercase tracking-widest font-bold hover:bg-white transition-all duration-300"
                 >
                   <RotateCcw size={14} className="group-hover:rotate-[-90deg] transition-transform duration-500" />
-                  Wipe Board Protocol
+                  Wipe Flow & try again
                 </button>
                 
                 <button 
                   onClick={() => dispatch({ type: 'HIDE_TRY_AGAIN' })}
                   className="w-full h-12 border border-[#2e2e2e] text-[#5b5b5b] font-mono text-[10px] uppercase tracking-widest hover:border-[#DEF767] hover:text-white transition-all"
                 >
-                  Dismiss_Warning
+                  Cancel
                 </button>
-              </div>
-
-              <div className="mt-8 pt-6 border-t border-[#2e2e2e] w-full">
-                <span className="font-mono text-[9px] uppercase tracking-[0.4em] text-[#5b5b5b]">Error_Code: SEQUENCE_MISMATCH_X04</span>
               </div>
             </div>
           </motion.div>
@@ -12506,11 +12801,6 @@ export default function FlowMiniCard({ card, persona, index, label }: Props) {
       <div className={styles.contentWrapper}>
         <p className={styles.content}>{card.heading || card.bodyText || ''}</p>
       </div>
-      
-      <div className={styles.decorative}>
-        <div className={styles.line} />
-        <div className={styles.dots} />
-      </div>
     </div>
   );
 }
@@ -12545,32 +12835,9 @@ export default function FlowMiniCard({ card, persona, index, label }: Props) {
   gap: 1px;
 }
 
-/* .slot { */
-  /* width: 36px; */
-  /* height: 50px; */
-  /* border-radius: 4px; */
-  /* border: 1px solid rgba(255, 255, 255, 0.1); */
-  /* background: rgba(255, 255, 255, 0.02); */
-  /* display: flex; */
-  /* flex-direction: column; */
-  /* padding: 2px; */
-  /* transition: all 0.3s ease; */
-  /* overflow: hidden; */
-  /* position: relative; */
-  /* flex-shrink: 0; */
-/* } */
-/*  */
-/* .miniCardScale { */
-  /* transform: scale(0.36); Scale 100x140 down to 36x50 approx */
-  /* transform-origin: top left; */
-  /* position: absolute; */
-  /* top: 0; */
-  /* left: 0; */
-/* } */
-
 .slot {
-  width: 34px; /* Reduced from 36px */
-  height: 48px; /* Reduced from 50px */
+  width: 36px; /* Reduced from 36px */
+  height: 50px; /* Reduced from 50px */
   border-radius: 4px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(255, 255, 255, 0.02);
@@ -12781,23 +13048,6 @@ import styles from './GameBoard.module.css';
 
 export default function GameBoard() {
   const { state, dispatch } = useGame();
-
-  const { data } = useSubscription<{ teams: any[] }>(WATCH_TEAMS, {
-    skip: !state.selectedPersona || state.gamePhase === 'WON' || state.gamePhase === 'PERSONA_TAKEN',
-  });
-  useEffect(() => {
-    if (!data || !state.selectedPersona || !state.currentUser) return;
-    const rivalTeam = data.teams.find(
-      (team: any) => team.color === state.selectedPersona?.color_code
-    );
-    if (rivalTeam && rivalTeam.leader_id !== state.currentUser.id) {
-      dispatch({
-        type: 'PERSONA_TAKEN_BY',
-        payload: rivalTeam.user?.name || 'Another player'
-      });
-    }
-  }, [data, state.selectedPersona, state.currentUser, dispatch]);
-
   return (
     <main className={styles.board} aria-label="Game board">
       <TopBar />
@@ -13735,24 +13985,27 @@ export default function PersonaMiniCard({ persona }: Props) {
   position: absolute;
   top: 16px;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 18px;
   font-weight: 600;
   letter-spacing: 0.14em;
   border: 1.5px solid rgba(0, 0, 0, 0.35);
   padding: 2px 7px;
   border-radius: 3px;
-  background: rgba(0, 0, 0, 0.12);
+  background: rgba(0, 0, 0, 0.188);
   color: rgba(0, 0, 0, 0.6);
   pointer-events: none;
-  z-index: 20;
+  z-index: 50;
 }
 
 .hintL {
-  left: 14px;
+  left: 26%;
+  top: 50%;
+
 }
 
 .hintR {
-  right: 14px;
+  right: 32%;
+  top: 50%;
 }
 
 .cue {
@@ -13770,10 +14023,10 @@ export default function PersonaMiniCard({ persona }: Props) {
 .btns {
   display: flex;
   align-items: center;
-  gap: 40px;
-  margin-top: -30px;
+  gap: 55px;
+  margin-top: -55px;
   /* Move them up into the deck area */
-  z-index: 30;
+  z-index: 35;
   position: relative;
 }
 
@@ -13796,25 +14049,25 @@ export default function PersonaMiniCard({ persona }: Props) {
 }
 
 .btnL {
-  background: var(--coral);
-  color: #000;
+  background: #ff6b6b;
+  color: #4a4a4a;
   border-color: rgba(0, 0, 0, 0.1);
 }
 
 .btnL:hover {
   background: #ff6b6b;
-  transform: translateY(-2px);
+  transform: translateX(-20px);
 }
 
 .btnR {
-  background: var(--lime);
-  color: #000;
+  background: #c4ff80;
+  color: #4a4a4a;
   border-color: rgba(0, 0, 0, 0.1);
 }
 
 .btnR:hover {
-  background: #e1ff80;
-  transform: translateY(-2px);
+  background: #c4ff80;
+  transform: translateX(20px);
 }
 
 .empty {
@@ -13832,8 +14085,8 @@ export default function PersonaMiniCard({ persona }: Props) {
 
 .resetBtn {
   font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--secondary);
+  font-size: 14px;
+  color: var(--text-main);
   border: 1px solid var(--border);
   background: transparent;
   padding: 8px 18px;
@@ -13975,7 +14228,6 @@ const DraggableCard = forwardRef<CardHandle, DraggableCardProps>(function Dragga
         />
       </div>
 
-      <p className={styles.cue}>← discard · select →</p>
     </motion.div>
   );
 });
@@ -14190,7 +14442,6 @@ export function GameWrapper({
 
   return (
     <div className="space-y-6 text-white selection:bg-[#ff6a6a] selection:text-[#171717]">
-      // {/* Active Game Header */}
       {endGameError && (
         <div className="border border-[#ff6a6a]/40 bg-[#ff6a6a]/10 px-3 py-2 font-mono text-[10px] uppercase tracking-[0.1em] text-[#ff6a6a]">
           {endGameError}
@@ -14224,7 +14475,7 @@ export function GameWrapper({
       </div>
       </div>
 
-      // {/* Main Grid: Game View + Multiplayer HUD */}
+      {/* Main Grid: Game View + Multiplayer HUD */}
       <div className="space-y-6">
         {room.game_id === 'persona-flow' && isHost ? (
         <div className="space-y-4">
@@ -14275,6 +14526,7 @@ export function GameWrapper({
               {/* Render the dynamic game component, passing down multiplayer sync props */}
               <GameComponent
                 isMultiplayer={true}
+                room={room}
                 roomId={room.id}
                 roomCode={room.code}
                 gameState={gameState}
@@ -15003,7 +15255,6 @@ import { useGame } from '@/store/gameStore';
 import { MOCK_DOMAINS } from '@/data/mockData';
 import { Domain } from '@/types';
 import styles from './DomainSelect.module.css';
-import { Play } from 'lucide-react';
 
 export default function DomainSelect() {
   const { state, dispatch } = useGame();
@@ -15021,8 +15272,6 @@ export default function DomainSelect() {
       <h1 className={styles.heading}>
         Select <span className={styles.accent}>Domain</span>
       </h1>
-      {/* <p className={styles.sub}>Choose your Domain to begin.</p> */}
-
       <div className={styles.grid}>
         {MOCK_DOMAINS.map((d, index) => {
           const domainTag = `D-${(index + 1).toString().padStart(2, '0')}`;
@@ -15046,13 +15295,6 @@ export default function DomainSelect() {
               <div className={styles.cardBody}>
                 <p className={styles.desc}>{d.description}</p>
               </div>
-
-              {/* Bottom Row: Play Button & Logo */}
-              {/* <div className={styles.cardFooter}>
-                <div className={styles.playBtn}>
-                  <Play size={12} fill="currentColor" />
-                </div>
-              </div> */}
 
               {/* Hover Accent Bar */}
               <div className={styles.accentBar} />
@@ -15342,22 +15584,68 @@ export default function DomainSelect() {
 
 ```tsx
 'use client';
-import React, { useState, useEffect } from 'react';
-import { useSubscription } from '@apollo/client/react';
+import { useState, useEffect } from 'react';
 import { useGame } from '@/store/gameStore';
-import { WATCH_TEAMS } from '@/lib/GameRules/game-queries';
 import { getCorrectCards, buildDeck, MOCK_CARDS as ALL_CARDS, MOCK_PERSONAS, MOCK_DOMAINS } from '@/data/mockData';
 import { Persona } from '@/types';
 import styles from './PersonaSelect.module.css';
+import { ArrowLeft } from "lucide-react";
 
-export default function PersonaSelect() {
+import { useMultiplayer } from '@/lib/multiplayer/useMultiplayer';
+
+type PersonaSelectProps = {
+  room?: any;
+};
+
+
+export default function PersonaSelect({ room }: PersonaSelectProps) {
   const { state, dispatch } = useGame();
   const domain = state.selectedDomain;
 
-  const { data, loading, error } = useSubscription<{ teams: any[] }>(WATCH_TEAMS);
-  const activeTeams = data?.teams || [];
+    const [isBypassed, setIsBypassed] = useState(false);
 
-  const [isBypassed, setIsBypassed] = useState(false);
+
+  // const { data, loading, error } = useSubscription<{ teams: any[] }>(WATCH_TEAMS);
+  // const activeTeams = data?.teams || [];
+
+  // const { room } = useMultiplayer();
+  const roomClaims = room?.room_persona_claims || [];
+
+   console.log('[PersonaSelect Room Scope]', {
+      roomId: room?.id,
+      roomCode: room?.code,
+      claimsCount: roomClaims.length,
+      claims: roomClaims.map((claim: any) => ({
+        userId: claim.user_id,
+        personaId: claim.persona_id,
+        personaName: claim.persona_name,
+        domainName: claim.domain_name,
+      })),
+    });
+  // const [isBypassed, setIsBypassed] = useState(false);
+  const availablePersonas = MOCK_PERSONAS
+      .filter((persona) => !domain || getCorrectCards(persona.id, domain.id).length > 0)
+      .map((persona) => {
+        const claim = roomClaims.find(
+          (claim: any) => claim.persona_id === persona.id
+        );
+
+        return {
+          ...persona,
+          status: (claim ? 'CLAIMED' : 'AVAILABLE') as 'CLAIMED' | 'AVAILABLE',
+          claimed_by_leader: claim?.user?.name || null,
+        };
+      });
+
+    function pick(persona: Persona) {
+      if (persona.status === 'CLAIMED') return;
+      if (!domain) return;
+
+      const correctCards = getCorrectCards(persona.id, domain.id);
+      const deck = buildDeck(correctCards, ALL_CARDS, domain.id);
+
+      dispatch({ type: 'SELECT_PERSONA', payload: { persona, correctCards, deck } });
+    }
 
   useEffect(() => {
     // Auto bypass after 6 seconds if still loading
@@ -15365,40 +15653,13 @@ export default function PersonaSelect() {
     return () => clearTimeout(autoTimer);
   }, []);
 
-  // Filter personas to only show those that have cards for the selected domain
-  const availablePersonas = MOCK_PERSONAS
-    .filter(p => !domain || getCorrectCards(p.id, domain.id).length > 0)
-    .map(persona => {
-      const claimingTeam = activeTeams.find((t: any) => t.color === persona.color_code);
-      return {
-        ...persona,
-        status: (claimingTeam ? 'CLAIMED' : 'AVAILABLE') as 'CLAIMED' | 'AVAILABLE',
-        claimed_by_leader: claimingTeam?.user?.name || null
-      };
-    });
 
-  function pick(persona: Persona) {
-    if (persona.status === 'CLAIMED') return;
-    if (!domain) return;
+  useEffect(() => {
+    const autoTimer = setTimeout(() => setIsBypassed(true), 3000);
+    return () => clearTimeout(autoTimer);
+  }, []);
 
-    const correctCards = getCorrectCards(persona.id, domain.id);
-    const deck = buildDeck(correctCards, ALL_CARDS, domain.id);
-
-    dispatch({ type: 'SELECT_PERSONA', payload: { persona, correctCards, deck } });
-  }
-
-  if (loading && !data && !error && !isBypassed) {
-    return (
-      <div className={styles.container}>
-        <div className={styles.eyebrow}>
-          <span>Auth_Protocol_Alpha</span>
-          <span className={styles.sep}>/</span>
-          <span>Syncing Nodes</span>
-        </div>
-        <h1 className={styles.heading}>Synchronizing...</h1>
-      </div>
-    );
-  }
+  
 
   return (
     <div className={styles.container}>
@@ -15407,7 +15668,8 @@ export default function PersonaSelect() {
           className={styles.backButton}
           onClick={() => dispatch({ type: 'GO_TO_PHASE', payload: 'DOMAIN_SELECT' })}
         >
-          <span>←</span> Back to Domains
+          <ArrowLeft size={14} />
+          Back to Domains
         </button>
       </div>
       <div className={styles.eyebrow}>
@@ -15460,6 +15722,7 @@ export default function PersonaSelect() {
     </div>
   );
 }
+
 ```
 
 ---
@@ -18110,6 +18373,70 @@ export * from './RuleManager';
 ### File: `lib/apollo-client.ts`
 
 ```typescript
+// import {
+//   ApolloClient,
+//   InMemoryCache,
+//   HttpLink,
+//   split,
+// } from '@apollo/client'
+// import { GraphQLWsLink } from '@apollo/client/link/subscriptions'
+// import { createClient } from 'graphql-ws'
+// import { getMainDefinition } from '@apollo/client/utilities'
+
+// export function makeApolloClient(token: string) {
+//   const httpUri = process.env.NEXT_PUBLIC_HASURA_HTTP
+//   const wsUri = process.env.NEXT_PUBLIC_HASURA_WS
+
+//   // Server-side / static export safe check
+//   const isServer = typeof window === 'undefined'
+
+//   const httpLink = new HttpLink({
+//     uri: httpUri,
+//     headers: {
+//       Authorization: token ? `Bearer ${token}` : '',
+//     },
+//   })
+
+//   // Only initialize WebSocket link on the client
+//   let splitLink;
+  
+//   if (!isServer) {
+//     const wsLink = new GraphQLWsLink(
+//       createClient({
+//         url: wsUri,
+//         connectionParams: {
+//           headers: {
+//             Authorization: token ? `Bearer ${token}` : '',
+//           },
+//         },
+//       })
+//     )
+
+//     // Subscriptions go over WS, everything else over HTTP
+//     splitLink = split(
+//       ({ query }) => {
+//         const def = getMainDefinition(query)
+//         return (
+//           def.kind === 'OperationDefinition' &&
+//           def.operation === 'subscription'
+//         )
+//       },
+//       wsLink,
+//       httpLink
+//     )
+//   } else {
+//     splitLink = httpLink
+//   }
+
+//   return new ApolloClient({
+//     link: splitLink,
+//     cache: new InMemoryCache(),
+//   })
+// }
+
+
+
+
 import {
   ApolloClient,
   InMemoryCache,
@@ -18121,10 +18448,14 @@ import { createClient } from 'graphql-ws'
 import { getMainDefinition } from '@apollo/client/utilities'
 
 export function makeApolloClient(token: string) {
-  const httpUri = process.env.NEXT_PUBLIC_HASURA_HTTP || 'http://localhost:8080/v1/graphql'
-  const wsUri = process.env.NEXT_PUBLIC_HASURA_WS || 'ws://localhost:8080/v1/graphql'
+  const httpUri =
+    process.env.NEXT_PUBLIC_HASURA_HTTP ||
+    'https://hasura.ubuntudevt65535.dpdns.org/v1/graphql'
 
-  // Server-side / static export safe check
+  const wsUri =
+    process.env.NEXT_PUBLIC_HASURA_WS ||
+    'wss://hasura.ubuntudevt65535.dpdns.org/v1/graphql'
+
   const isServer = typeof window === 'undefined'
 
   const httpLink = new HttpLink({
@@ -18134,9 +18465,8 @@ export function makeApolloClient(token: string) {
     },
   })
 
-  // Only initialize WebSocket link on the client
-  let splitLink;
-  
+  let splitLink = httpLink
+
   if (!isServer) {
     const wsLink = new GraphQLWsLink(
       createClient({
@@ -18149,10 +18479,10 @@ export function makeApolloClient(token: string) {
       })
     )
 
-    // Subscriptions go over WS, everything else over HTTP
     splitLink = split(
       ({ query }) => {
         const def = getMainDefinition(query)
+
         return (
           def.kind === 'OperationDefinition' &&
           def.operation === 'subscription'
@@ -18161,8 +18491,6 @@ export function makeApolloClient(token: string) {
       wsLink,
       httpLink
     )
-  } else {
-    splitLink = httpLink
   }
 
   return new ApolloClient({
@@ -19664,6 +19992,8 @@ export interface GameState {
   currentUser:    User | null;
   selectedDomain: Domain | null;
   selectedPersona: Persona | null;
+  takenBy:         null,
+  outpacedBy:      null
   correctCards:   Card[];
   deck:           Card[];
   pool:           Card[];
@@ -19713,6 +20043,8 @@ const initialState: GameState = {
   showTryAgainPopup: false,
   showDeck:        true,
   leaderboard:     [],
+  takenBy:         null,
+  outpacedBy:      null
 };
 
 // ─── ACTIONS ──────────────────────────────────────────────────
@@ -19733,7 +20065,8 @@ export type Action =
   | { type: 'SHOW_TRY_AGAIN' }
   | { type: 'HIDE_TRY_AGAIN' }
   | { type: 'PLACE_CARD_FORCE';   payload: { card: Card } }
-  | { type: 'TOGGLE_DECK_VISIBILITY' };
+  | { type: 'TOGGLE_DECK_VISIBILITY' }
+  | { type: 'PICK_ANOTHER_PERSONA' };
 
 function reducer(state: GameState, action: Action): GameState {
   // Ensure leaderboard exists to prevent HMR or state initialization issues
@@ -20002,125 +20335,6 @@ export function useGame() {
 ### File: `types/index.ts`
 
 ```typescript
-// 
-// lib/types.ts — Shared game types
-
-// export type CardType = 'IDENTITY' | 'DESCRIPTION' | 'SCENARIO' | 'TASK' | 'TASK_FLOW' | 'PERSUASION';
-// export type PersonaStatus = 'AVAILABLE' | 'CLAIMED';
-// export type GameMode = 'LOCK_ON_FILL' | 'REPLACE_ALLOWED' | 'SOFT_LOCK';
-
-// export interface User {
-//   id: string;
-//   username: string;
-//   teamName?: string;
-//   teamMembers?: string[];
-// }
-
-// export interface Domain {
-//   id: string;
-//   name: string;
-//   description: string;
-//   icon: string;
-// }
-
-// // export interface Persona {
-//   // id: string;
-//   // name: string;
-//   // color_code: string;
-//   // asset_path: string;
-//   // status: PersonaStatus;
-//   // claimed_by_user_id: string | null;
-//   // claimed_at: string | null;
-// // }
-
-// export interface Persona {
-//   id: string;
-//   name: string;
-//   domain_id: string; 
-//   color_code: string;
-//   asset_path: string;
-//   status: PersonaStatus;
-//   claimed_by_user_id: string | null;
-//   claimed_at?: string | null; // <--- Add this line back
-//   description?: string;
-//   scenario?: string;
-//   ux_problems?: string;
-//   ui_problems?: string;
-//   cx_problems?: string;
-//   ai_problems?: string;
-//   persona_details?: string; 
-// }
-
-
-
-// export interface Card {
-//   id: string;
-//   persona_id: string;
-//   domain_id: string;
-//   card_type: CardType;
-//   content: string;
-//   isUpgraded?: boolean;
-//   // New fields to support the rich card design
-//   heading?: string;
-//   subHeading?: string;
-//   listItems?: string[];
-//   sections?: { label: string; value: string }[];
-// }
-
-// export interface GameSession {
-//   id: string;
-//   user_id: string;
-//   persona_id: string;
-//   domain_id: string;
-//   slot_identity_id: string | null;
-//   slot_description_id: string | null;
-//   slot_scenario_id: string | null;
-//   slot_task_id: string | null;
-//   slot_task_flow_id: string | null;
-//   slot_persuasion_id: string | null;
-//   is_complete: boolean;
-// }
-
-// export type SlotKey = 'IDENTITY' | 'DESCRIPTION' | 'SCENARIO' | 'TASK' | 'TASK_FLOW' | 'PERSUASION';
-
-// export interface SlotState {
-//   IDENTITY:    Card | null;
-//   DESCRIPTION: Card | null;
-//   SCENARIO:    Card | null;
-//   TASK:        Card | null;
-//   TASK_FLOW:   Card | null;
-//   PERSUASION:  Card | null;
-// }
-
-// export const SLOT_ORDER: SlotKey[] = [
-//   'IDENTITY', 
-//   'DESCRIPTION', 
-//   'SCENARIO', 
-//   'TASK', 
-//   'TASK_FLOW', 
-//   'PERSUASION'
-// ];
-
-// export const SLOT_LABELS: Record<SlotKey, string> = {
-//   IDENTITY:    'Identity',
-//   DESCRIPTION: 'Persona',
-//   SCENARIO:    'Scenario',
-//   TASK:        'Task',
-//   TASK_FLOW:   'Flow',
-//   PERSUASION:  'Tool',
-// };
-
-// export const CARD_TYPE_SLOT_MAP: Record<CardType, SlotKey> = {
-//   IDENTITY:    'IDENTITY',
-//   DESCRIPTION: 'DESCRIPTION',
-//   SCENARIO:    'SCENARIO',
-//   TASK:        'TASK',
-//   TASK_FLOW:   'TASK_FLOW',
-//   PERSUASION:  'PERSUASION',
-// };
-
-
-
 // lib/types.ts — Shared game types
 
 export type CardType = 'AVATAR' | 'PERSONA' | 'SCENARIO' | 'UX_PROBLEM' | 'UI_PROBLEM' | 'CX_PROBLEM' | 'AI_PROBLEM';
@@ -20229,6 +20443,7 @@ export const CARD_TYPE_SLOT_MAP: Record<CardType, SlotKey> = {
   CX_PROBLEM: 'CX_PROBLEM',
   AI_PROBLEM: 'AI_PROBLEM',
 };
+
 ```
 
 ---

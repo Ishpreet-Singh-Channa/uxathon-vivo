@@ -1,10 +1,16 @@
 'use client'
 
 import React, { useState, useEffect } from 'react'
-import { Copy, Check, Users, Shield, Play } from 'lucide-react'
+import { Copy, Check, Users, Shield, Play, MessageCircle } from 'lucide-react'
 import { GamePanel, gameButtonPrimary, gameButtonSecondary } from '@/app/games/_components/GameShell'
 import { getAllGames } from '@/app/games/registry'
 import { MultiplayerRoom } from '@/lib/multiplayer/types'
+
+import {
+  getRoomInviteUrl,
+  getWhatsAppInviteMessage,
+} from '@/lib/room-invite'
+
 
 type LobbyProps = {
   room: MultiplayerRoom
@@ -52,6 +58,26 @@ export function Lobby({ room, userId, isHost, isWS, onStart, onLeave }: LobbyPro
     }
   }
 
+  const copyInviteLink = async () => {
+    try {
+      await navigator.clipboard.writeText(getRoomInviteUrl(room.code))
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (err) {
+      console.error('Failed to copy invite link:', err)
+    }
+  }
+
+  const shareToWhatsApp = () => {
+    const message = getWhatsAppInviteMessage(room.code)
+    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(message)}`
+
+    window.open(whatsappUrl, '_blank', 'noopener,noreferrer')
+  }
+
+
+  
+
   function getImageUrl(imagePath?: string | null) {
     if (!imagePath) return "";
     
@@ -88,10 +114,13 @@ export function Lobby({ room, userId, isHost, isWS, onStart, onLeave }: LobbyPro
       {/* Lobby Room Code Card */}
       <GamePanel className="text-center py-8">
         <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#5b5b5b]">LOBBY COORDINATE KEY</p>
-        <div className="mt-3 inline-flex items-center justify-center gap-3">
+        
+        
+        <div className="mt-3 inline-flex flex-wrap items-center justify-center gap-3">
           <h2 className="font-sans text-[42px] uppercase leading-none tracking-[0.05em] text-white">
             {room.code}
           </h2>
+
           <button
             type="button"
             onClick={copyCode}
@@ -101,8 +130,31 @@ export function Lobby({ room, userId, isHost, isWS, onStart, onLeave }: LobbyPro
             {copied ? <Check size={14} className="text-[#DEF767]" /> : <Copy size={14} />}
           </button>
         </div>
+
+        {isHost && (
+          <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={shareToWhatsApp}
+              className="flex h-11 items-center justify-center gap-2 border border-[#25D366]/50 bg-[#181818] px-4 font-mono text-[11px] uppercase tracking-[0.14em] text-[#25D366] active:bg-[#25D366] active:text-[#171717]"
+            >
+              <MessageCircle size={14} />
+              Share on WhatsApp
+            </button>
+
+            <button
+              type="button"
+              onClick={copyInviteLink}
+              className="flex h-11 items-center justify-center gap-2 border border-[#2e2e2e] bg-[#181818] px-4 font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292] active:border-[rgba(222,247,103,0.5)] active:text-[#DEF767]"
+            >
+              {copied ? <Check size={14} /> : <Copy size={14} />}
+              Copy Join Link
+            </button>
+          </div>
+        )}
+
         <p className="mt-4 font-mono text-[9px] uppercase tracking-[0.12em] text-[#929292]">
-          {copied ? 'Signal coordinate key copied!' : 'Distribute key code to sync peer nodes'}
+          {copied ? 'Invite copied!' : 'Share the invite link or room code to sync peer nodes'}
         </p>
       </GamePanel>
 

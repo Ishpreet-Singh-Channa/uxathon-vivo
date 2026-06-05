@@ -81,37 +81,97 @@ function PersonaFlowBridge({
   //   dispatch,
   // ]);
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//-----------------------------------------------------------------------------------------------------------
+//   useEffect(() => {
+//     if (!isMultiplayerActive || !room || !state.selectedPersona || !userId) return;
+
+//     const shouldWatchForOutpaced =
+//       state.gamePhase === 'PLAYING' || state.gamePhase === 'WON';
+
+//     if (!shouldWatchForOutpaced) return;
+
+//     // const claim = room.room_persona_claims?.find(
+//     //   (c: any) => c.persona_id === state.selectedPersona?.id
+//     // );
+//     const claim = currentRoomClaims.find(
+//       (claim: any) =>
+//         claim.room_id === room.id &&
+//         claim.persona_id === state.selectedPersona?.id
+//     );
+// // logs----------------------
+//       console.log('[Persona Outpaced Check]', {
+//       currentRoomId: room.id,
+//       currentRoomCode: room.code,
+//       selectedPersonaId: state.selectedPersona?.id,
+//       userId,
+//       claimsInCurrentRoom: currentRoomClaims.map((claim: any) => ({
+//         roomId: claim.room_id,
+//         userId: claim.user_id,
+//         personaId: claim.persona_id,
+//         name: claim.user?.name,
+//       })),
+//       matchedClaim: claim,
+//     });
+// // logs----------------------
+//     if (claim && claim.user_id !== userId) {
+//       dispatch({
+//         type: 'PERSONA_TAKEN_BY',
+//         payload: claim.user?.name || 'Another player',
+//       });
+//     }
+//   }, [
+//     isMultiplayerActive,
+//     room?.id,
+//     room?.code,
+//     currentRoomClaims,
+//     state.selectedPersona?.id,
+//     state.gamePhase,
+//     userId,
+//     dispatch,
+//   ]);
+  
+
   useEffect(() => {
-    if (!isMultiplayerActive || !room || !state.selectedPersona || !userId) return;
+    if (!isMultiplayerActive || !room?.id || !state.selectedPersona?.id || !userId) {
+      return;
+    }
 
     const shouldWatchForOutpaced =
-      state.gamePhase === 'PLAYING' || state.gamePhase === 'WON';
+      state.gamePhase === 'PLAYING' ||
+      state.gamePhase === 'WON' ||
+      state.gamePhase === 'PERSONA_TAKEN';
 
     if (!shouldWatchForOutpaced) return;
 
-    // const claim = room.room_persona_claims?.find(
-    //   (c: any) => c.persona_id === state.selectedPersona?.id
-    // );
-    const claim = currentRoomClaims.find(
-      (claim: any) =>
-        claim.room_id === room.id &&
-        claim.persona_id === state.selectedPersona?.id
-    );
-// logs----------------------
-      console.log('[Persona Outpaced Check]', {
-      currentRoomId: room.id,
-      currentRoomCode: room.code,
-      selectedPersonaId: state.selectedPersona?.id,
-      userId,
-      claimsInCurrentRoom: currentRoomClaims.map((claim: any) => ({
-        roomId: claim.room_id,
-        userId: claim.user_id,
-        personaId: claim.persona_id,
-        name: claim.user?.name,
-      })),
-      matchedClaim: claim,
+    const claim = currentRoomClaims.find((claim: any) => {
+      const sameRoom =
+        !claim.room_id || claim.room_id === room.id;
+
+      const samePersona =
+        claim.persona_id === state.selectedPersona?.id;
+
+      return sameRoom && samePersona;
     });
-// logs----------------------
+
     if (claim && claim.user_id !== userId) {
       dispatch({
         type: 'PERSONA_TAKEN_BY',
@@ -121,14 +181,17 @@ function PersonaFlowBridge({
   }, [
     isMultiplayerActive,
     room?.id,
-    room?.code,
     currentRoomClaims,
     state.selectedPersona?.id,
     state.gamePhase,
     userId,
     dispatch,
   ]);
-  
+
+
+
+
+//----------------------------------------------------------------------------------------------------------
 
   // Sync User Data Automatically in Multiplayer
   useEffect(() => {

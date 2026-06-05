@@ -15,7 +15,6 @@ const EVENTS = [
         id: "persona-race",
         type: "GAME",
         title: "Persona Race",
-        tag: "X-04",
         description: "Sort through the architectural archetypes to define your operational stance. Restraint is a value; density is earned.",
         icon: <Zap className="text-[#DEF767]" size={20} />,
         status: "ACTIVE",
@@ -25,7 +24,6 @@ const EVENTS = [
         id: "event-bidding",
         type: "BIDDING",
         title: "Event Biddings",
-        tag: "X-07",
         description: "Participate in high-stakes auctions to secure elite personnel. Winners gain the right to buy their team members first.",
         icon: <Gavel className="text-[#ff6a6a]" size={20} />,
         status: "LOCKED",
@@ -87,18 +85,12 @@ export default function EventHubPage() {
 
             {/* Header */}
             <header className="relative z-10 pt-4 px-6 sm:px-12 max-w-4xl flex flex-col items-center text-center">
-                {/* <div className="flex items-center gap-3 mb-4">
-                    <div className="h-[1px] w-12 bg-[#2e2e2e]" />
-                    <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#5b5b5b]">Operational Hub / {transId}</span>
-                    <div className="h-[1px] w-12 bg-[#2e2e2e]" />
-                </div> */}
-
                 <h1 className="font-serif text-[clamp(2.5rem,8vw,4rem)] uppercase leading-[0.9] tracking-tight">
-                    Event <span className="text-[#DEF767]">Terminal</span>
+                    Event <span className="text-[#DEF767]">Playground</span>
                 </h1>
 
-                <p className="mt-8 font-sans text-[13px] leading-relaxed text-[#929292] max-w-[45ch]">
-                    Select a module to initiate the protocol. Each event is a singular node in the UXISM architecture.
+                <p className="mt-8 font-sans text-[15px] leading-relaxed text-[#929292] max-w-[45ch]">
+                    Play the games before everyone else joins in a competetive room.
                 </p>
             </header>
 
@@ -121,12 +113,6 @@ export default function EventHubPage() {
                             }}
                         />
                     ))}
-                </div>
-
-                {/* Technical Footnote */}
-                <div className="mt-12 font-mono text-[9px] text-[#5b5b5b] uppercase tracking-widest flex items-center justify-center gap-4">
-                    <Cpu size={12} />
-                    <span>System Status: Optimal / {EVENTS.length} Nodes Online</span>
                 </div>
             </section>
 
@@ -239,7 +225,6 @@ function EventRow({ event, index, onSelect }: { event: typeof EVENTS[0], index: 
                     {event.icon}
                 </div>
                 <div className="text-left">
-                    <div className="font-mono text-[9px] text-[#5b5b5b] mb-1">{event.tag}</div>
                     <h3 className="font-serif text-lg uppercase tracking-wider text-white group-hover:text-[#DEF767] transition-colors">
                         {event.title}
                     </h3>
@@ -256,7 +241,6 @@ function EventRow({ event, index, onSelect }: { event: typeof EVENTS[0], index: 
                         }`}>
                         {event.status}
                     </span>
-                    <span className="text-[8px] font-mono text-[#5b5b5b] mt-1">{event.coord}</span>
                 </div>
                 <div className={`h-8 w-8 rounded-full grid place-items-center border transition-all ${isLocked ? "border-[#2e2e2e]" : "border-[#5b5b5b] group-hover:border-[#DEF767] group-hover:bg-[#DEF767] group-hover:text-[#171717]"
                     }`}>

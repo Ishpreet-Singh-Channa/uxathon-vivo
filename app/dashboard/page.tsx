@@ -151,7 +151,7 @@ export default function DashboardPage() {
             {/* Footer Navigation bar layout definitions */}
             <nav className="fixed bottom-0 left-0 right-0 z-20 border-t border-[#2e2e2e] bg-[#181818]/95 h-16 flex items-center justify-around font-mono text-[10px]">
                 <button onClick={() => router.push("/myteam")} className="flex flex-col items-center text-[#FFFFFF]"> <Users size={16} /> TEAM </button>
-                <Link href="/x" className="flex flex-col items-center text-[#FFFFFF]"><Gem size={16} />X</Link>
+                <Link href="/x" className="flex flex-col items-center text-[#FFFFFF]"><Gem size={16} />Playground</Link>
                 <Link href="/games" className="flex flex-col items-center text-[#FFFFFF]"><Gamepad2 size={16} />GAMES LOUNGE</Link>
                 <Link href="/live" className="flex flex-col items-center text-[#FFFFFF]"><MessageCircle size={16} />LIVE STREAM</Link>
             </nav>
