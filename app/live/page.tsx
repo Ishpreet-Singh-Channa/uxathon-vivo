@@ -64,7 +64,6 @@ const CHAT_SUBSCRIPTION = gql`
         live_chat(order_by: { created_at: desc }, where: { session_id: { _eq: $sessionId } }) {
             user {
                 name
-                profile_picture
             }
             message
         }
@@ -578,12 +577,12 @@ export default function LivePage() {
                     </div>
                 )}
 
-                {!questionOpen && (
+                {/* {!questionOpen && (
                     <button type="button" onClick={() => setQuestionOpen(true)} className="flex h-10 items-center gap-2 rounded-[24px] border border-[#5b5b5b] bg-[#181818] px-3 font-mono text-[10px] uppercase tracking-[0.14em] text-[#929292] active:border-[rgba(222,247,103,0.5)] active:text-[#DEF767]" aria-label="Ask a question">
                         <MessageCircle size={15} />
                         Ask me a question
                     </button>
-                )}
+                )} */}
             </div>
 
             <style jsx global>{`
