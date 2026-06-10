@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { act, useMemo } from "react";
 import Link from "next/link";
 import { ArrowLeft, Users, Crown } from "lucide-react";
 import { gql } from "@apollo/client";
@@ -9,33 +9,16 @@ import { useAuth } from "@/context/token-context";
 import { BottomNav } from "@/components/BottomNav";
 
 const GET_MY_TEAM = gql`
-  query GetMyTeam($userId: uuid!) {
+  query GetMyTeamAndMembers($userId: uuid!) {
     team_members(where: { user_id: { _eq: $userId } }) {
-      id
-      member_type
-      team {
+      user {
         id
         name
-        created_at
-        created_by
-        leader_id
-        room_id
-        domain_id
-        domain_name
-        domain_description
-        persona_id
-        persona_name
-        persona_hex
-        team_members {
-          id
-          member_type
-          user {
-            id
-            name
-            profile_picture
-          }
-        }
       }
+    }
+    teams {
+      id
+      name
     }
   }
 `;
@@ -141,9 +124,7 @@ export default function MyTeamPage() {
 
   const hasUserId = Boolean(userId);
 
-  const { data, loading, error } = useQuery<{
-    team_members: TeamRecord[];
-  }>(GET_MY_TEAM, {
+  const { data, loading, error } = useQuery<any>(GET_MY_TEAM, {
     variables: hasUserId ? { userId } : undefined,
     skip: !hasUserId,
     fetchPolicy: "network-only",
@@ -151,14 +132,15 @@ export default function MyTeamPage() {
 
   const team = useMemo(() => {
     const records = data?.team_members ?? [];
+    const actualTeam = data?.teams[0] ?? null;
+    const actualData = { ...actualTeam, team_members: data?.team_members ?? [] };
+    // const personaRecord = records.find((record) => {
+    //   const normalizedTeam = normalizeTeam(record.team);
+    //   return Boolean(normalizedTeam?.room_id && normalizedTeam?.persona_id);
+    // });
 
-    const personaRecord = records.find((record) => {
-      const normalizedTeam = normalizeTeam(record.team);
-      return Boolean(normalizedTeam?.room_id && normalizedTeam?.persona_id);
-    });
-
-    const selectedRecord = personaRecord ?? records[0];
-    return normalizeTeam(selectedRecord?.team ?? null);
+    // const selectedRecord = personaRecord ?? records[0];
+    return normalizeTeam(actualData);
   }, [data]);
 
   const members: TeamMember[] = Array.isArray(team?.team_members)
@@ -175,7 +157,7 @@ export default function MyTeamPage() {
     );
   }
 
-  if (loading) {
+  if (hasUserId && loading) {
     return (
       <main className="relative min-h-screen bg-[#181818] text-white flex items-center justify-center">
         <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#5b5b5b]">
@@ -241,14 +223,14 @@ export default function MyTeamPage() {
                   <h1 className="mt-2 font-sans text-[32px] uppercase tracking-[0.04em] text-white">
                     {team.name}
                   </h1>
-                  <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">
+                  {/* <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.14em] text-[#5b5b5b]">
                     Created{" "}
                     {new Date(team.created_at).toLocaleDateString("en-US", {
                       month: "short",
                       day: "numeric",
                       year: "numeric",
                     })}
-                  </p>
+                  </p> */}
                 </div>
 
               </div>
