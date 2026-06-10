@@ -35,9 +35,16 @@
 const HASURA_ENDPOINT = 'https://hasura.ubuntudevt65535.dpdns.org/v1/graphql'
 const HASURA_ADMIN_SECRET = 'secret'
 
-export async function hasuraAdminRequest<T = any>(
+type HasuraResponse<T> = {
+  data?: T
+  errors?: Array<{ message: string }>
+  error?: string
+  message?: string
+}
+
+export async function hasuraAdminRequest<T = unknown>(
   query: string,
-  variables?: Record<string, any>
+  variables?: Record<string, unknown>
 ): Promise<T> {
   if (!HASURA_ENDPOINT) {
     throw new Error('Missing HASURA_GRAPHQL_ENDPOINT environment variable')
@@ -59,12 +66,12 @@ export async function hasuraAdminRequest<T = any>(
   const contentType = res.headers.get('content-type') || ''
   const rawText = await res.text()
 
-  let json: any = null
+  let json: HasuraResponse<T> | null = null
 
   if (contentType.includes('application/json')) {
     try {
       json = JSON.parse(rawText)
-    } catch (err) {
+    } catch {
       console.error('[Hasura JSON parse failed]', {
         status: res.status,
         contentType,
@@ -91,9 +98,17 @@ export async function hasuraAdminRequest<T = any>(
     throw new Error(json?.error || json?.message || `Hasura HTTP ${res.status}`)
   }
 
+  if (!json) {
+    throw new Error('Hasura returned an empty response')
+  }
+
   if (json.errors) {
     console.error('Hasura error:', json.errors)
     throw new Error(json.errors[0].message)
+  }
+
+  if (!json.data) {
+    throw new Error('Hasura response did not include data')
   }
 
   return json.data

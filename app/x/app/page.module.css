@@ -1,7 +1,0 @@
-.shell {
-  position: relative;
-  z-index: 2;
-  min-height: 100vh;
-  /* Content in left 75%, FABs in right 25% */
-  display: block;
-}

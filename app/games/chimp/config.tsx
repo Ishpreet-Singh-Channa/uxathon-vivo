@@ -1,5 +1,4 @@
 import { lazy } from "react";
-import { registerGame } from "../registry";
 
 export const chimpConfig = {
   id: "chimp",
@@ -12,7 +11,3 @@ export const chimpConfig = {
   rounds: 99,
   component: lazy(() => import("./page")),
 };
-
-export function initChimp() {
-  registerGame(chimpConfig);
-}

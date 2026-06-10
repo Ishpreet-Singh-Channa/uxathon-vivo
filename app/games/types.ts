@@ -14,7 +14,7 @@ export interface GameDefinition {
   realtime: boolean;
   leaderboard: boolean;
   rounds: number;
-  component: React.ComponentType<any>;
+  component: React.ComponentType<Record<string, never>>;
 }
 
 export type GameLifecycleStatus = 'idle' | 'ready' | 'playing' | 'paused' | 'completed' | 'reviewing';

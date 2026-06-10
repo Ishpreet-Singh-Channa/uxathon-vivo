@@ -1,5 +1,4 @@
 import { lazy } from "react";
-import { registerGame } from "../registry";
 
 export const reactionTimeConfig = {
   id: "reaction-time",
@@ -12,7 +11,3 @@ export const reactionTimeConfig = {
   rounds: 5,
   component: lazy(() => import("./page")),
 };
-
-export function initReactionTime() {
-  registerGame(reactionTimeConfig);
-}

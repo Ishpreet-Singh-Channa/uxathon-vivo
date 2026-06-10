@@ -1,15 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { ArrowLeft, Gavel, Gamepad2, MessageCircle, User, Users } from "lucide-react";
-import React, { useState, useEffect } from "react";
-const bottomNavItems = [
-  { label: "My Team", href: "/myteam", icon: Users, enabled: true },
-  { label: "Bidding", href: null, icon: Gavel, enabled: false },
-  { label: "Games", href: "/games", icon: Gamepad2, enabled: true },
-  { label: "Live Chat", href: "/live", icon: MessageCircle, enabled: true },
-];
+import { ArrowLeft } from "lucide-react";
+import React from "react";
+import { BottomNav } from "@/components/BottomNav";
 
 type GameShellProps = {
   meta: string;
@@ -20,24 +14,6 @@ type GameShellProps = {
 };
 
 export function GameShell({ meta, title, description, children, variant = "default", }: GameShellProps) {
-  const pathname = usePathname();
-
-  const [activeRoomCode, setActiveRoomCode] = useState<string | null>(null);
-
-  useEffect(() => {
-    const roomMatch = pathname?.match(/^\/room\/([A-Z0-9]+)/i);
-    if (roomMatch) {
-      const code = roomMatch[1].toUpperCase();
-      setActiveRoomCode(code);
-      localStorage.setItem('active-room-code', code);
-    } else {
-      const saved = localStorage.getItem('active-room-code');
-      if (saved) {
-        setActiveRoomCode(saved);
-      }
-    }
-  }, [pathname]);
-
   const shellWidthClass =
   variant === "stage"
     ? "max-w-[1800px] px-3 sm:px-6 lg:px-10 xl:px-14"
@@ -46,16 +22,16 @@ export function GameShell({ meta, title, description, children, variant = "defau
       : "max-w-lg px-5";
 
   return (
-    <main className="relative flex min-h-screen flex-col overflow-hidden bg-[#181818] text-white selection:bg-[#ff6a6a] selection:text-[#171717]">
+    <main className="relative flex min-h-screen flex-col overflow-hidden bg-[#181818] pb-20 text-white selection:bg-[#ff6a6a] selection:text-[#171717]">
       <PageDecor />
 
-      <section className="relative z-10 mx-auto flex w-full max-w-lg flex-1 flex-col px-5 pb-28 pt-6 ${shellWidthClass}">
+      <section className={`relative z-10 mx-auto flex w-full flex-1 flex-col pb-8 pt-6 ${shellWidthClass}`}>
         <Link
-          href="/dashboard"
+          href="/games"
           className="mb-6 inline-flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292] active:text-[#DEF767]"
         >
           <ArrowLeft size={14} aria-hidden />
-          Dashboard
+          Games
         </Link>
         <div className="mb-6">
           <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">{meta}</p>
@@ -66,6 +42,7 @@ export function GameShell({ meta, title, description, children, variant = "defau
         </div>
         {children}
       </section>
+      <BottomNav />
     </main>
   );
 }

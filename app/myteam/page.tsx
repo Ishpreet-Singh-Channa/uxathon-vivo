@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import Link from "next/link";
 import { ArrowLeft, Users, Crown } from "lucide-react";
 import { gql } from "@apollo/client";
 import { useQuery } from "@apollo/client/react";
 import { useAuth } from "@/context/token-context";
+import { BottomNav } from "@/components/BottomNav";
 
 const GET_MY_TEAM = gql`
   query GetMyTeam($userId: uuid!) {
@@ -130,21 +131,17 @@ function getUserIdFromJwt(token: string | null) {
 
 export default function MyTeamPage() {
   const auth = useAuth();
-  const [userId, setUserId] = useState<string | null>(null);
-  const [isDropping, setIsDropping] = useState(false);
-  const [dropError, setDropError] = useState("");
-
-  useEffect(() => {
+  const userId = useMemo(() => {
     const authData = auth?.getData?.() as { id?: string } | null;
     const idFromAuthData = authData?.id ?? null;
     const idFromJwt = getUserIdFromJwt(auth?.getJwt?.() ?? null);
 
-    setUserId(idFromAuthData || idFromJwt);
+    return idFromAuthData || idFromJwt;
   }, [auth]);
 
   const hasUserId = Boolean(userId);
 
-  const { data, loading, error, refetch } = useQuery<{
+  const { data, loading, error } = useQuery<{
     team_members: TeamRecord[];
   }>(GET_MY_TEAM, {
     variables: hasUserId ? { userId } : undefined,
@@ -167,50 +164,6 @@ export default function MyTeamPage() {
   const members: TeamMember[] = Array.isArray(team?.team_members)
     ? team.team_members
     : [];
-
-  async function dropPersona() {
-    if (!team?.id) return;
-
-    const confirmed = window.confirm(
-      `Drop ${team.persona_name || team.name}? This will make the persona available again.`
-    );
-
-    if (!confirmed) return;
-
-    setIsDropping(true);
-    setDropError("");
-
-    try {
-      const token = auth.getJwt();
-
-      const res = await fetch("/api/persona-flow/drop", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: token ? `Bearer ${token}` : "",
-        },
-        body: JSON.stringify({
-          teamId: team.id,
-        }),
-      });
-
-      const contentType = res.headers.get("content-type") || "";
-      const responseData = contentType.includes("application/json")
-        ? await res.json()
-        : { error: await res.text() };
-
-      if (!res.ok) {
-        throw new Error(responseData.error || "Failed to drop persona");
-      }
-
-      await refetch();
-    } catch (err: any) {
-      console.error("Drop persona failed:", err);
-      setDropError(err.message || "Failed to drop persona");
-    } finally {
-      setIsDropping(false);
-    }
-  }
 
   if (!hasUserId) {
     return (
@@ -248,7 +201,7 @@ export default function MyTeamPage() {
   }
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#181818] text-white selection:bg-[#ff6a6a] selection:text-[#171717]">
+    <main className="relative min-h-screen overflow-hidden bg-[#181818] pb-20 text-white selection:bg-[#ff6a6a] selection:text-[#171717]">
       <div className="pointer-events-none fixed inset-0 opacity-25 [background-image:radial-gradient(#5b5b5b_1px,transparent_1px)] [background-size:18px_18px]" />
 
       <header className="relative z-20 flex items-center justify-between border-b border-[#2e2e2e] bg-[#181818]/95 px-5 py-4 backdrop-blur-[2px]">
@@ -298,16 +251,6 @@ export default function MyTeamPage() {
                   </p>
                 </div>
 
-                {team.room_id && team.persona_id && (
-                  <button
-                    type="button"
-                    onClick={dropPersona}
-                    disabled={isDropping}
-                    className="shrink-0 border border-[#ff6a6a]/60 bg-[#181818] px-3 py-2 font-mono text-[9px] uppercase tracking-[0.12em] text-[#ff6a6a] transition-colors hover:bg-[#ff6a6a] hover:text-[#171717] disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    {isDropping ? "Dropping..." : "Drop Persona"}
-                  </button>
-                )}
               </div>
 
               {team.room_id && team.persona_id && (
@@ -334,11 +277,6 @@ export default function MyTeamPage() {
                     </p>
                   )}
 
-                  {dropError && (
-                    <p className="mt-3 font-mono text-[10px] uppercase tracking-[0.12em] text-[#ff6a6a]">
-                      {dropError}
-                    </p>
-                  )}
                 </div>
               )}
             </div>
@@ -410,6 +348,7 @@ export default function MyTeamPage() {
           </>
         )}
       </section>
+      <BottomNav />
     </main>
   );
 }

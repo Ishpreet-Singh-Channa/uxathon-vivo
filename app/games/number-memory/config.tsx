@@ -1,5 +1,4 @@
 import { lazy } from "react";
-import { registerGame } from "../registry";
 
 export const numberMemoryConfig = {
   id: "number-memory",
@@ -12,7 +11,3 @@ export const numberMemoryConfig = {
   rounds: 99,
   component: lazy(() => import("./page")),
 };
-
-export function initNumberMemory() {
-  registerGame(numberMemoryConfig);
-}
