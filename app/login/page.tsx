@@ -91,10 +91,10 @@ export default function LoginPage() {
           <header className="space-y-8">
             <div>
               <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">
-                UXISM / LOGIN / OTP
+                CHESTA / LOGIN / OTP
               </p>
               <h1 className="mt-3 max-w-[10ch] font-sans text-[40px] uppercase leading-[0.92] tracking-[0.02em] text-white sm:text-[56px]">
-                Welcome to UXISM
+                Welcome to CHESTA
               </h1>
             </div>
 
@@ -135,7 +135,7 @@ export default function LoginPage() {
                       setError("");
                     }}
                     placeholder="name@domain.com"
-                    className="uxism-input"
+                    className="chesta-input"
                     autoComplete="email"
                     inputMode="email"
                   />
@@ -177,7 +177,7 @@ export default function LoginPage() {
                       setError("");
                     }}
                     placeholder="123456"
-                    className="uxism-input text-center font-mono text-[18px] tracking-[0.32em]"
+                    className="chesta-input text-center font-mono text-[18px] tracking-[0.32em]"
                     autoComplete="one-time-code"
                     inputMode="numeric"
                     maxLength={6}
@@ -213,7 +213,7 @@ export default function LoginPage() {
       </section>
 
       <style jsx global>{`
-        .uxism-input {
+        .chesta-input {
           width: 100%;
           height: 54px;
           border: 1px solid #2e2e2e;
@@ -225,11 +225,11 @@ export default function LoginPage() {
           outline: none;
         }
 
-        .uxism-input::placeholder {
+        .chesta-input::placeholder {
           color: #5b5b5b;
         }
 
-        .uxism-input:focus {
+        .chesta-input:focus {
           border-color: rgba(222, 247, 103, 0.5);
         }
       `}</style>

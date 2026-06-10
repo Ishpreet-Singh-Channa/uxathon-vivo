@@ -142,7 +142,7 @@ function normalizeMessages(items?: ChatItem[]) {
 }
 
 function getVoteStorageKey(sessionId: string) {
-    return `uxism-live-votes:${sessionId}`;
+    return `chesta-live-votes:${sessionId}`;
 }
 
 function subscribeVoteStorage(onStoreChange: () => void) {
@@ -444,7 +444,7 @@ export default function LivePage() {
 
                         <div className="mt-7 flex items-end justify-between gap-6">
                             <div>
-                                <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">UXISM / LIVE CHAT / EVENT ROOM</p>
+                                <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">CHESTA / LIVE CHAT / EVENT ROOM</p>
                                 <h1 className="mt-3 font-sans text-[36px] uppercase leading-[0.92] tracking-[0.02em] text-white sm:text-[48px]">Signal Room</h1>
                             </div>
 

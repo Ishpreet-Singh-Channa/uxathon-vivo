@@ -73,7 +73,7 @@ export default function DashboardPage() {
 
       <header className="relative z-20 flex shrink-0 items-center justify-between border-b border-[#2e2e2e] bg-[#181818]/95 px-5 py-4">
         <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#929292]">
-          UXISM<span className="text-[#5b5b5b]">/</span>DASHBOARD
+          CHESTA<span className="text-[#5b5b5b]">/</span>DASHBOARD
         </p>
         <button
           type="button"

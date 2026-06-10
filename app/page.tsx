@@ -15,10 +15,10 @@ export default function HomePage() {
 
             <section className="relative z-10 flex min-h-screen items-center justify-center px-5">
                 <div className="flex w-full max-w-md flex-col items-center text-center">
-                    <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">UXISM / SPLASH / 2026</p>
+                    <p className="font-mono text-[11px] uppercase tracking-[0.18em] text-[#5b5b5b]">CESTA / SPLASH / 2026</p>
 
                     <h1 className="mt-4 font-sans text-[clamp(2.5rem,12vw,4.5rem)] uppercase leading-[0.92] tracking-[0.02em] text-white">
-                        UXATHON&apos;26
+                        CESTA&apos;26
                     </h1>
 
                     <p className="mt-4 max-w-[28ch] text-[13px] leading-[1.5] text-[#929292]">

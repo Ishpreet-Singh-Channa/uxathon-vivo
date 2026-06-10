@@ -33,7 +33,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const verifyOtp = async (email: string, otp: string) => {
         const tokens = await verifyLoginOtp({ email, otp });
         localStorage.setItem(JWT_KEY, tokens.jwtToken);
-        localStorage.setItem(REFRESH_KEY, tokens.refreshToken);
+        // localStorage.setItem(REFRESH_KEY, tokens.refreshToken);
         setRefresh((v) => v + 1);
     };
 

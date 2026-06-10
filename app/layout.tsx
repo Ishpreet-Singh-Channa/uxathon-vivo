@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-    title: "UXathon - Uxism",
-    description: "Uxism is a platform that connects UX designers with companies.",
+    title: "Cesta",
+    description: "Cesta",
 };
 
 export default function RootLayout({
