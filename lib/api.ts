@@ -16,7 +16,7 @@ export type AuthTokens = {
 
 export async function sendLoginOtp({ email }: SendOtpInput) {
 
-  const res = await fetch("http://api.uxathon.com/api/auth/login", {
+  const res = await fetch("https://api.uxathon.com/api/auth/login", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
