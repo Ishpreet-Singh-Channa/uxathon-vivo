@@ -16,7 +16,7 @@ export type AuthTokens = {
 
 export async function sendLoginOtp({ email }: SendOtpInput) {
 
-  const res = await fetch("https://api.uxathon.com/api/auth/login", {
+  const res = await fetch("https://api.uxathon.org/api/auth/login", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -38,7 +38,7 @@ export async function sendLoginOtp({ email }: SendOtpInput) {
 }
 
 export async function verifyLoginOtp({ email, otp }: VerifyOtpInput): Promise<AuthTokens> {
-  const res = await fetch("https://api.uxathon.com/api/auth/login", {
+  const res = await fetch("https://api.uxathon.org/api/auth/login", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
